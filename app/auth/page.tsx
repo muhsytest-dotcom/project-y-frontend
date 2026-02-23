@@ -9,12 +9,13 @@ import { Card } from "@/components/ui/Card";
 import { Toast, ToastStack } from "@/components/ui/ToastStack";
 import { getStoredSession, setStoredSession } from "@/lib/session";
 import { Locale, t } from "@/lib/i18n";
+import { getPreferredLocale, setPreferredLocale } from "@/lib/locale";
 
 type Mode = "signup" | "login" | "verify";
 
 export default function AuthPage() {
   const router = useRouter();
-  const [locale, setLocale] = useState<Locale>("en");
+  const [locale, setLocale] = useState<Locale>(() => getPreferredLocale("en"));
   const [mode, setMode] = useState<Mode>("signup");
   const [loading, setLoading] = useState(false);
 
@@ -137,7 +138,15 @@ export default function AuthPage() {
               <h1 className="mt-3 text-2xl font-black sm:text-3xl">{words.title}</h1>
               <p className="soft mt-2">{words.subtitle}</p>
             </div>
-            <select className="select w-auto min-w-20" value={locale} onChange={(e) => setLocale(e.target.value as Locale)}>
+            <select
+              className="select w-auto min-w-20"
+              value={locale}
+              onChange={(e) => {
+                const next = e.target.value as Locale;
+                setLocale(next);
+                setPreferredLocale(next);
+              }}
+            >
               <option value="en">EN</option>
               <option value="ar">AR</option>
             </select>

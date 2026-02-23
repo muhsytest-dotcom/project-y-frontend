@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { analyticsApi, publicApi } from "@/lib/api";
+import { analyticsApi, catalogApi, contentApi, publicApi, storesApi } from "@/lib/api";
 import { Card } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Toast, ToastStack } from "@/components/ui/ToastStack";
@@ -12,6 +12,9 @@ import { CartAndCheckoutSection } from "@/components/storefront/CartAndCheckoutS
 import { OrderResultSection } from "@/components/storefront/OrderResultSection";
 import { Locale, t } from "@/lib/i18n";
 import { convertMinor, formatMinorMoney, getFxTable } from "@/lib/currency";
+import { getPreferredLocale, setPreferredLocale } from "@/lib/locale";
+import { resolvePreviewToken } from "@/lib/preview";
+import { resolveStorefrontTheme } from "@/lib/storefront-theme";
 
 type Product = {
   id: string;
@@ -46,6 +49,10 @@ function key(prefix: string): string {
 }
 
 export default function StorefrontPage() {
+  return <StorefrontScreen />;
+}
+
+export function StorefrontScreen({ previewToken }: { previewToken?: string }) {
   const [loading, setLoading] = useState(true);
 
   const [store, setStore] = useState<Record<string, unknown> | null>(null);
@@ -74,14 +81,19 @@ export default function StorefrontPage() {
   });
 
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [locale, setLocale] = useState<Locale>("en");
+  const [locale, setLocale] = useState<Locale>(() => getPreferredLocale("en"));
   const [rtl, setRtl] = useState(false);
   const [preferredCurrency, setPreferredCurrency] = useState("SAR");
+  const [activeTheme, setActiveTheme] = useState<Record<string, unknown> | null>(null);
+  const [previewSession, setPreviewSession] = useState<{ storeId: string; access: string } | null>(null);
 
   const cartItems = useMemo(() => ((cart?.items as CartItem[] | undefined) || []), [cart]);
   const words = t(locale).storefront;
   const toast = words.toast;
+  const isPreview = Boolean(previewSession);
   const fx = useMemo(() => getFxTable(String(store?.default_currency || "SAR")), [store]);
+  const theme = useMemo(() => resolveStorefrontTheme(store, activeTheme), [store, activeTheme]);
+  const themeName = String(activeTheme?.name || activeTheme?.code || "classic");
   const amount = (minor: number | undefined, currencyCode: string | undefined) => {
     const rawMinor = Number(minor || 0);
     const sourceCurrency = String(currencyCode || preferredCurrency || "SAR").toUpperCase();
@@ -93,27 +105,79 @@ export default function StorefrontPage() {
     return formatMoney(locale, convertedMinor, targetCurrency);
   };
 
+  useEffect(() => {
+    if (!previewToken) {
+      setPreviewSession(null);
+      return;
+    }
+    const payload = resolvePreviewToken(previewToken);
+    if (!payload) {
+      pushToast("error", toast.invalidPreviewToken);
+      setPreviewSession(null);
+      setLoading(false);
+      return;
+    }
+    setPreviewSession({ storeId: payload.storeId, access: payload.access });
+  }, [previewToken, toast.invalidPreviewToken]);
+
   /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     void (async () => {
+      if (previewToken && !previewSession) return;
       setLoading(true);
       try {
-        const [storeRes, sectionRes, categoryRes, productsRes] = await Promise.all([publicApi.store(), publicApi.sections("home"), publicApi.categories(), publicApi.products()]);
-        setStore(storeRes);
-        setSections(sectionRes.items || []);
-        setCategories(categoryRes.items || []);
-        setProducts((productsRes.items || []) as Product[]);
-        await analyticsApi.ingestPublicEvent({ event_name: "page_view", source: "storefront" });
+        if (previewSession) {
+          const [storeRes, sectionRes, categoryRes, productsRes, themesRes] = await Promise.all([
+            storesApi.getStore(previewSession.access, previewSession.storeId),
+            contentApi.listSections(previewSession.access, previewSession.storeId, "home"),
+            catalogApi.listCategories(previewSession.access, previewSession.storeId),
+            catalogApi.listProducts(previewSession.access, previewSession.storeId),
+            contentApi.listThemes(previewSession.access, previewSession.storeId),
+          ]);
+          setStore(storeRes);
+          setSections(sectionRes.items || []);
+          setCategories(categoryRes.items || []);
+          setProducts(
+            ((productsRes.items || []) as Array<Record<string, unknown>>).map((p) => ({
+              id: String(p.id),
+              name: String(p.name || ""),
+              slug: String(p.slug || ""),
+              description: String(p.description || ""),
+              price_amount_minor: Number(p.base_price_amount_minor || 0),
+              currency_code: String(p.currency_code || "SAR"),
+            })),
+          );
+          const active = (themesRes.items || []).find((item) => Boolean((item as Record<string, unknown>).is_active));
+          setActiveTheme((active || null) as Record<string, unknown> | null);
+        } else {
+          const [storeRes, sectionRes, categoryRes, productsRes] = await Promise.all([
+            publicApi.store(),
+            publicApi.sections("home"),
+            publicApi.categories(),
+            publicApi.products(),
+          ]);
+          setStore(storeRes);
+          setSections(sectionRes.items || []);
+          setCategories(categoryRes.items || []);
+          setProducts((productsRes.items || []) as Product[]);
+          setActiveTheme((storeRes.active_theme as Record<string, unknown> | undefined) || null);
+          await analyticsApi.ingestPublicEvent({ event_name: "page_view", source: "storefront" });
+        }
       } catch (err) {
         pushToast("error", err instanceof Error ? err.message : toast.failedLoadStorefront);
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [previewToken, previewSession?.storeId, previewSession?.access]);
   /* eslint-enable react-hooks/exhaustive-deps */
 
   useEffect(() => {
+    setPreferredLocale(locale);
+  }, [locale]);
+
+  useEffect(() => {
+    if (previewSession) return;
     void (async () => {
       setLoading(true);
       try {
@@ -127,7 +191,7 @@ export default function StorefrontPage() {
     })();
     // search trigger remains explicit via Search button.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoryId]);
+  }, [categoryId, previewSession]);
 
   function pushToast(tone: Toast["tone"], message: string) {
     const id = `${Date.now()}-${Math.random()}`;
@@ -139,10 +203,24 @@ export default function StorefrontPage() {
     setLoading(true);
     try {
       const q = search.trim();
-      const res = await publicApi.products(q, categoryId);
-      setProducts((res.items || []) as Product[]);
-      if (q) {
-        await analyticsApi.ingestPublicEvent({ event_name: "search", source: "storefront", search_query: q });
+      if (previewSession) {
+        const res = await catalogApi.listProducts(previewSession.access, previewSession.storeId, `limit=50&offset=0&search=${encodeURIComponent(q)}`);
+        setProducts(
+          ((res.items || []) as Array<Record<string, unknown>>).map((p) => ({
+            id: String(p.id),
+            name: String(p.name || ""),
+            slug: String(p.slug || ""),
+            description: String(p.description || ""),
+            price_amount_minor: Number(p.base_price_amount_minor || 0),
+            currency_code: String(p.currency_code || "SAR"),
+          })),
+        );
+      } else {
+        const res = await publicApi.products(q, categoryId);
+        setProducts((res.items || []) as Product[]);
+        if (q) {
+          await analyticsApi.ingestPublicEvent({ event_name: "search", source: "storefront", search_query: q });
+        }
       }
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : toast.searchFailed);
@@ -152,6 +230,10 @@ export default function StorefrontPage() {
   }
 
   async function updateCartItem(itemId: string, nextQuantity: number) {
+    if (previewSession) {
+      pushToast("info", toast.previewCheckoutUnavailable);
+      return;
+    }
     if (!cart?.token) return;
     setLoading(true);
     try {
@@ -166,6 +248,10 @@ export default function StorefrontPage() {
   }
 
   async function deleteCartItem(itemId: string) {
+    if (previewSession) {
+      pushToast("info", toast.previewCheckoutUnavailable);
+      return;
+    }
     if (!cart?.token) return;
     setLoading(true);
     try {
@@ -187,11 +273,36 @@ export default function StorefrontPage() {
   async function loadProduct(slug: string) {
     setLoading(true);
     try {
-      const detail = await publicApi.product(slug);
+      let detail: Record<string, unknown>;
+      if (previewSession) {
+        const inList = products.find((p) => p.slug === slug);
+        if (!inList) throw new Error(toast.productLoadFailed);
+        const options = await catalogApi.listOptions(previewSession.access, previewSession.storeId, inList.id);
+        detail = {
+          id: inList.id,
+          name: inList.name,
+          slug: inList.slug,
+          description: inList.description,
+          price_amount_minor: inList.price_amount_minor,
+          currency_code: inList.currency_code,
+          options: (options || []).map((opt) => ({
+            ...opt,
+            values: (((opt as Record<string, unknown>).values as Array<Record<string, unknown>>) || []).map((v) => ({
+              id: v.id,
+              label: v.label,
+              price_delta_minor: Number(v.price_delta_minor || 0),
+            })),
+          })),
+        };
+      } else {
+        detail = await publicApi.product(slug);
+      }
       setSelectedProduct(detail);
       setSelectedOptionValueIds([]);
       setQuantity(1);
-      await analyticsApi.ingestPublicEvent({ event_name: "product_view", product_id: detail.id, source: "storefront" });
+      if (!previewSession) {
+        await analyticsApi.ingestPublicEvent({ event_name: "product_view", product_id: detail.id, source: "storefront" });
+      }
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : toast.productLoadFailed);
     } finally {
@@ -200,6 +311,7 @@ export default function StorefrontPage() {
   }
 
   async function ensureCartToken(): Promise<string> {
+    if (previewSession) throw new Error(toast.previewCheckoutUnavailable);
     if (cart?.token) return cart.token as string;
     const created = await publicApi.createCart();
     setCart(created);
@@ -207,6 +319,10 @@ export default function StorefrontPage() {
   }
 
   async function addToCart() {
+    if (previewSession) {
+      pushToast("info", toast.previewCheckoutUnavailable);
+      return;
+    }
     if (!selectedProduct?.id) {
       pushToast("error", toast.selectProductFirst);
       return;
@@ -235,6 +351,10 @@ export default function StorefrontPage() {
   }
 
   async function getQuote() {
+    if (previewSession) {
+      pushToast("info", toast.previewCheckoutUnavailable);
+      return;
+    }
     if (!cart?.token) {
       pushToast("error", toast.createCartFirst);
       return;
@@ -257,6 +377,10 @@ export default function StorefrontPage() {
   }
 
   async function checkout() {
+    if (previewSession) {
+      pushToast("info", toast.previewCheckoutUnavailable);
+      return;
+    }
     if (!cart?.token || cartItems.length === 0) {
       pushToast("error", toast.cartIsEmpty);
       return;
@@ -295,7 +419,7 @@ export default function StorefrontPage() {
   }
 
   return (
-    <main className="px-4 py-8 sm:px-8" dir={rtl ? "rtl" : "ltr"}>
+    <main className="px-4 py-8 sm:px-8" dir={rtl ? "rtl" : "ltr"} data-theme={theme.themeKey} style={theme.style}>
       <ToastStack toasts={toasts} />
       <div className="mx-auto max-w-7xl space-y-6">
             <HeaderSection labels={words} />
@@ -326,7 +450,11 @@ export default function StorefrontPage() {
             setRtl={setRtl}
             preferredCurrency={preferredCurrency}
             setPreferredCurrency={setPreferredCurrency}
+            directionLabel={words.direction}
+            currencyPlaceholder={words.currencyPlaceholder}
             searchProducts={searchProducts}
+            isPreview={isPreview}
+            themeName={themeName}
           />
         ) : null}
 

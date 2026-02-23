@@ -1,40 +1,51 @@
-import Link from "next/link";
+"use client";
 
-const sellingPoints = [
-  "No-login checkout with WhatsApp handoff",
-  "Tenant-safe global SaaS architecture",
-  "Manual payments now, Stripe-ready later",
-  "Arabic/RTL-ready frontend foundation",
-];
+import Link from "next/link";
+import { useState } from "react";
+import { Locale, t } from "@/lib/i18n";
+import { getPreferredLocale, setPreferredLocale } from "@/lib/locale";
 
 export default function HomePage() {
+  const [locale, setLocale] = useState<Locale>(() => getPreferredLocale("en"));
+  const words = t(locale).home;
+
+  function onLocaleChange(next: Locale) {
+    setLocale(next);
+    setPreferredLocale(next);
+  }
+
   return (
-    <main className="px-4 py-10 sm:px-8">
+    <main className="px-4 py-10 sm:px-8" dir={locale === "ar" ? "rtl" : "ltr"}>
       <div className="mx-auto max-w-6xl space-y-8">
         <header className="panel p-6 sm:p-8">
-          <p className="badge badge-info">Universal Chat Commerce SaaS</p>
+          <div className="flex items-start justify-between gap-3">
+            <p className="badge badge-info">{words.badge}</p>
+            <select className="select w-auto min-w-20" value={locale} onChange={(e) => onLocaleChange(e.target.value as Locale)}>
+              <option value="en">EN</option>
+              <option value="ar">AR</option>
+            </select>
+          </div>
           <h1 className="mt-4 text-3xl font-black leading-tight sm:text-5xl">
-            Launch store owners in minutes. Convert buyers with fast chat-first checkout.
+            {words.title}
           </h1>
           <p className="soft mt-4 max-w-3xl text-base sm:text-lg">
-            Built for Saudi first, then UAE, Europe, and USA. Multi-tenant, multi-product, no-login flow with email + WhatsApp order
-            confirmation.
+            {words.subtitle}
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
             <Link href="/auth" className="button button-primary">
-              Signup / Login
+              {words.signupLogin}
             </Link>
             <Link href="/dashboard" className="button button-muted">
-              Open Dashboard
+              {words.openDashboard}
             </Link>
             <Link href="/storefront" className="button button-muted">
-              Open Storefront
+              {words.openStorefront}
             </Link>
           </div>
         </header>
 
         <section className="grid gap-4 sm:grid-cols-2">
-          {sellingPoints.map((point) => (
+          {words.points.map((point) => (
             <article key={point} className="panel p-5">
               <h2 className="text-lg font-bold">{point}</h2>
             </article>

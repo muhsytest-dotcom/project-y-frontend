@@ -32,6 +32,8 @@ import { AnalyticsTab } from "@/components/dashboard/AnalyticsTab";
 import { IntegrationsTab } from "@/components/dashboard/IntegrationsTab";
 import { Locale, t } from "@/lib/i18n";
 import { formatMinorMoney } from "@/lib/currency";
+import { getPreferredLocale, setPreferredLocale } from "@/lib/locale";
+import { createPreviewToken } from "@/lib/preview";
 
 function asText(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -40,7 +42,7 @@ function asText(value: unknown): string {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [locale, setLocale] = useState<Locale>("en");
+  const [locale, setLocale] = useState<Locale>(() => getPreferredLocale("en"));
 
   const [tab, setTab] = useState<TabKey>("overview");
   const [session, setSession] = useState<SessionState>({ access: "", refresh: "" });
@@ -316,7 +318,13 @@ export default function DashboardPage() {
     if (type === "primary") await runWithSession((token) => storesApi.makePrimaryDomain(token, storeId, domainId));
     if (type === "delete") await runWithSession((token) => storesApi.deleteDomain(token, storeId, domainId));
     pushToast("success", toast.domainActionDone);
-    await loadStoreData(storeId);
+    await refreshDomainStatuses();
+  }
+
+  async function refreshDomainStatuses() {
+    if (!storeId) return;
+    const res = await runWithSession((token) => storesApi.listDomains(token, storeId));
+    setDomains(res.items || []);
   }
 
   async function onPublish(shouldPublish: boolean) {
@@ -847,7 +855,28 @@ export default function DashboardPage() {
     router.replace("/auth");
   }
 
+  function openPreviewStorefront() {
+    if (!storeId || !session.access) {
+      router.push("/storefront");
+      return;
+    }
+    const token = createPreviewToken({ storeId, access: session.access, refresh: session.refresh });
+    router.push(`/storefront/preview/${encodeURIComponent(token)}`);
+  }
+
   const storeName = useMemo(() => stores.find((s) => s.store_id === storeId)?.name || "", [stores, storeId]);
+
+  /* eslint-disable react-hooks/exhaustive-deps */
+  useEffect(() => {
+    if (tab !== "store" || !storeId) return;
+    const hasPending = domains.some((domain) => asText(domain.verification_status) === "pending");
+    if (!hasPending) return;
+    const interval = setInterval(() => {
+      void refreshDomainStatuses();
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [tab, storeId, domains]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   return (
     <main className="px-4 py-8 sm:px-8" dir={locale === "ar" ? "rtl" : "ltr"}>
@@ -878,8 +907,17 @@ export default function DashboardPage() {
             </div>
             <div className="flex flex-wrap gap-2">
               <Link href="/storefront" className="button button-muted">{words.storefront}</Link>
+              <Button variant="muted" onClick={openPreviewStorefront}>Preview</Button>
               <Link href="/dashboard/onboarding" className="button button-muted">{words.onboarding}</Link>
-              <select className="select w-auto min-w-20" value={locale} onChange={(e) => setLocale(e.target.value as Locale)}>
+              <select
+                className="select w-auto min-w-20"
+                value={locale}
+                onChange={(e) => {
+                  const next = e.target.value as Locale;
+                  setLocale(next);
+                  setPreferredLocale(next);
+                }}
+              >
                 <option value="en">EN</option>
                 <option value="ar">AR</option>
               </select>
@@ -971,14 +1009,28 @@ export default function DashboardPage() {
                 <input className="input" placeholder={form.customDomainPlaceholder} value={newDomainHost} onChange={(e) => setNewDomainHost(e.target.value)} />
                 <Button>{form.add}</Button>
               </form>
+              <div className="mt-3">
+                <Button variant="muted" onClick={() => void refreshDomainStatuses()}>{form.refreshStatuses}</Button>
+              </div>
               <ul className="mt-3 space-y-2 text-sm">
                 {domains.map((d) => (
                   <li key={asText(d.id)} className="rounded-lg border border-[#d9ddcf] bg-white p-3">
                     <p className="font-semibold">{asText(d.host)} • {asText(d.verification_status)}</p>
+                    <p className="soft mt-1">
+                      {form.dnsTarget}: <span className="code">{asText(d.dns_target) || "cname.yourapp.com"}</span>
+                    </p>
                     <div className="mt-2 flex gap-2">
                       <Button variant="muted" onClick={() => void onDomainAction("verify", asText(d.id))}>{form.verify}</Button>
                       <Button variant="muted" onClick={() => void onDomainAction("primary", asText(d.id))}>{form.makePrimary}</Button>
                       <Button variant="danger" onClick={() => void onDomainAction("delete", asText(d.id))}>{form.delete}</Button>
+                    </div>
+                    <div className="mt-2 rounded-lg border border-[#e3e7da] bg-[#f8f9f4] p-2">
+                      <p className="font-semibold">{form.dnsInstructions}</p>
+                      <ol className="mt-1 list-decimal space-y-1 pl-5">
+                        <li>{form.dnsStep1}</li>
+                        <li>{form.dnsStep2}</li>
+                        <li>{form.dnsStep3}</li>
+                      </ol>
                     </div>
                   </li>
                 ))}

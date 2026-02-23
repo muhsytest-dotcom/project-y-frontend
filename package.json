@@ -10,7 +10,8 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:install": "playwright install chromium",
-    "test:e2e:ci": "npm run build && playwright test"
+    "test:e2e:ci": "npm run build && playwright test",
+    "test:e2e:backend": "E2E_REAL_BACKEND=1 playwright test e2e/backend.real.spec.ts"
   },
   "dependencies": {
     "next": "16.1.6",

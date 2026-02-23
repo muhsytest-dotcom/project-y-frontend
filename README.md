@@ -43,6 +43,12 @@ Run E2E in headed mode:
 npm run test:e2e:headed
 ```
 
+Run real-backend integration E2E (requires backend running):
+
+```bash
+E2E_API_BASE=http://127.0.0.1:8000/api/v1 npm run test:e2e:backend
+```
+
 ## CI-ready E2E flow
 
 Use this command in CI:
@@ -62,6 +68,8 @@ GitHub Actions workflow is included at:
 - `E2E_PORT`: server port for Playwright-managed web server (default `3000`)
 - `E2E_BASE_URL`: override base URL (default `http://127.0.0.1:<E2E_PORT>`)
 - `E2E_SERVER_CMD`: override server command used by Playwright
+- `E2E_API_BASE`: backend API base injected into Next server process for tests
+- `E2E_REAL_BACKEND`: if set, enables `e2e/backend.real.spec.ts`
 - `CI`: if set, Playwright uses `next start`; otherwise `next dev`
 
 ## Notes

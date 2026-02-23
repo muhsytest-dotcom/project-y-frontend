@@ -9,13 +9,15 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Toast, ToastStack } from "@/components/ui/ToastStack";
 import { Locale, t } from "@/lib/i18n";
+import { getPreferredLocale, setPreferredLocale } from "@/lib/locale";
+import { createPreviewToken } from "@/lib/preview";
 
 const steps = ["brand", "seo", "first_product", "options", "sections", "preview", "payment", "domain"] as const;
 type Step = (typeof steps)[number];
 
 export default function OnboardingWizardPage() {
   const router = useRouter();
-  const [locale, setLocale] = useState<Locale>("en");
+  const [locale, setLocale] = useState<Locale>(() => getPreferredLocale("en"));
   const [session, setSession] = useState<SessionState>({ access: "", refresh: "" });
   const [storeId, setStoreId] = useState("");
   const [currentStep, setCurrentStep] = useState<Step>("brand");
@@ -289,8 +291,7 @@ export default function OnboardingWizardPage() {
           type: domainDraft.type,
         }),
       );
-      const updated = await runWithSession((token) => storesApi.listDomains(token, storeId));
-      setDomains(updated.items || []);
+      await refreshDomains();
       setDomainDraft((prev) => ({ ...prev, host: "" }));
       pushToast("success", toast.domainAdded);
     } catch (err) {
@@ -305,8 +306,7 @@ export default function OnboardingWizardPage() {
     setLoading(true);
     try {
       await runWithSession((token) => storesApi.verifyDomain(token, storeId, domainDraft.selectedDomainId));
-      const updated = await runWithSession((token) => storesApi.listDomains(token, storeId));
-      setDomains(updated.items || []);
+      await refreshDomains();
       pushToast("success", toast.domainVerifyTriggered);
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : toast.failedVerifyDomain);
@@ -320,8 +320,7 @@ export default function OnboardingWizardPage() {
     setLoading(true);
     try {
       await runWithSession((token) => storesApi.makePrimaryDomain(token, storeId, domainDraft.selectedDomainId));
-      const updated = await runWithSession((token) => storesApi.listDomains(token, storeId));
-      setDomains(updated.items || []);
+      await refreshDomains();
       pushToast("success", toast.primaryDomainUpdated);
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : toast.failedSetPrimaryDomain);
@@ -329,6 +328,33 @@ export default function OnboardingWizardPage() {
       setLoading(false);
     }
   }
+
+  async function refreshDomains() {
+    if (!storeId) return;
+    const updated = await runWithSession((token) => storesApi.listDomains(token, storeId));
+    setDomains(updated.items || []);
+  }
+
+  function openPreviewStorefront() {
+    if (!storeId || !session.access) {
+      router.push("/storefront");
+      return;
+    }
+    const token = createPreviewToken({ storeId, access: session.access, refresh: session.refresh });
+    router.push(`/storefront/preview/${encodeURIComponent(token)}`);
+  }
+
+  /* eslint-disable react-hooks/exhaustive-deps */
+  useEffect(() => {
+    if (currentStep !== "domain" || !storeId) return;
+    const hasPending = domains.some((d) => String(d.verification_status || "") === "pending");
+    if (!hasPending) return;
+    const interval = setInterval(() => {
+      void refreshDomains();
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [currentStep, storeId, domains]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   return (
     <main className="px-4 py-8 sm:px-8" dir={locale === "ar" ? "rtl" : "ltr"}>
@@ -343,8 +369,16 @@ export default function OnboardingWizardPage() {
             </div>
             <div className="flex gap-2">
               <Link href="/dashboard" className="button button-muted">{words.backToDashboard}</Link>
-              <Link href="/storefront" className="button button-muted">{words.openStorefront}</Link>
-              <select className="select w-auto min-w-20" value={locale} onChange={(e) => setLocale(e.target.value as Locale)}>
+              <Button variant="muted" onClick={openPreviewStorefront}>{words.openStorefront}</Button>
+              <select
+                className="select w-auto min-w-20"
+                value={locale}
+                onChange={(e) => {
+                  const next = e.target.value as Locale;
+                  setLocale(next);
+                  setPreferredLocale(next);
+                }}
+              >
                 <option value="en">EN</option>
                 <option value="ar">AR</option>
               </select>
@@ -450,7 +484,7 @@ export default function OnboardingWizardPage() {
             <h2 className="text-xl font-bold">{words.previewPublish}</h2>
             <p className="soft mt-2">{words.previewHelp}</p>
             <div className="mt-3 flex gap-2">
-              <Link href="/storefront" className="button button-muted">{words.previewStorefront}</Link>
+              <Button variant="muted" onClick={openPreviewStorefront}>{words.previewStorefront}</Button>
               <Button onClick={() => void completePreview()} disabled={loading}>{words.continueToPayment}</Button>
             </div>
           </Card>
@@ -497,6 +531,35 @@ export default function OnboardingWizardPage() {
               <Button variant="muted" onClick={() => void verifyDomain()} disabled={loading}>{words.verify}</Button>
               <Button variant="muted" onClick={() => void makePrimaryDomain()} disabled={loading}>{words.makePrimary}</Button>
             </div>
+
+            <div className="mt-3">
+              <Button variant="muted" onClick={() => void refreshDomains()} disabled={loading}>{words.refreshDomains}</Button>
+            </div>
+
+            {domainDraft.selectedDomainId ? (
+              <div className="mt-3 rounded-xl border border-[#d9ddcf] bg-white p-3 text-sm">
+                {(() => {
+                  const selected = domains.find((d) => String(d.id) === domainDraft.selectedDomainId);
+                  if (!selected) return null;
+                  const dnsTarget = String(selected.dns_target || "cname.yourapp.com");
+                  const status = String(selected.verification_status || "pending");
+                  return (
+                    <div className="space-y-2">
+                      <p><span className="font-semibold">{words.dnsTarget}:</span> <span className="code">{dnsTarget}</span></p>
+                      <p><span className="font-semibold">{words.verificationStatus}:</span> {status}</p>
+                      <div>
+                        <p className="font-semibold">{words.dnsInstructions}</p>
+                        <ol className="mt-1 list-decimal space-y-1 pl-5">
+                          <li>{words.dnsStep1}</li>
+                          <li>{words.dnsStep2}</li>
+                          <li>{words.dnsStep3}</li>
+                        </ol>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : null}
           </Card>
         ) : null}
       </div>

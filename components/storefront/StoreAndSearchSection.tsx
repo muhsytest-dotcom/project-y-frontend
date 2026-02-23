@@ -12,6 +12,8 @@ type Props = {
     search: string;
     searchPlaceholder: string;
     allCategories: string;
+    previewMode?: string;
+    activeTheme?: string;
   };
   search: string;
   setSearch: (value: string) => void;
@@ -23,7 +25,11 @@ type Props = {
   setRtl: (value: boolean) => void;
   preferredCurrency: string;
   setPreferredCurrency: (value: string) => void;
+  directionLabel: string;
+  currencyPlaceholder: string;
   searchProducts: () => Promise<void>;
+  isPreview: boolean;
+  themeName: string;
 };
 
 export function StoreAndSearchSection({
@@ -41,13 +47,21 @@ export function StoreAndSearchSection({
   setRtl,
   preferredCurrency,
   setPreferredCurrency,
+  directionLabel,
+  currencyPlaceholder,
   searchProducts,
+  isPreview,
+  themeName,
 }: Props) {
   return (
     <section className="grid gap-4 lg:grid-cols-3">
       <Card className="lg:col-span-2">
         <h2 className="text-xl font-bold">{labels.store}</h2>
         <p className="soft mt-1">{store ? `${String(store.name)} • ${String(store.default_currency)}` : labels.unresolved}</p>
+        <p className="soft mt-1">{labels.activeTheme || "Active theme"}: {themeName}</p>
+        {isPreview ? (
+          <p className="badge badge-warn mt-2">{labels.previewMode || "Preview mode"}</p>
+        ) : null}
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           {sections.map((s) => (
             <div key={String(s.id)} className="rounded-xl border border-[#d9ddcf] bg-white p-3">
@@ -78,9 +92,9 @@ export function StoreAndSearchSection({
             </select>
             <select className="select" value={rtl ? "rtl" : "ltr"} onChange={(e) => setRtl(e.target.value === "rtl")}>
               <option value="ltr">LTR</option>
-              <option value="rtl">RTL</option>
+              <option value="rtl">{directionLabel} RTL</option>
             </select>
-            <input className="input" value={preferredCurrency} onChange={(e) => setPreferredCurrency(e.target.value.toUpperCase())} placeholder="SAR" />
+            <input className="input" value={preferredCurrency} onChange={(e) => setPreferredCurrency(e.target.value.toUpperCase())} placeholder={currencyPlaceholder} />
           </div>
           <Button onClick={() => void searchProducts()}>{labels.search}</Button>
         </div>
