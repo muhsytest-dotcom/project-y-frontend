@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Project Y Frontend
 
-## Getting Started
+Next.js frontend for Universal Chat Commerce SaaS.
 
-First, run the development server:
+## Prerequisites
+
+- Node.js 20+
+- Backend API available at `NEXT_PUBLIC_API_BASE` (default: `http://127.0.0.1:8000/api/v1`)
+
+## Local Development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://127.0.0.1:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Build
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run build
+npm run start
+```
 
-## Learn More
+## End-to-End Tests (Playwright)
 
-To learn more about Next.js, take a look at the following resources:
+Install browser once:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run test:e2e:install
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Run E2E in local mode (Playwright auto-starts Next dev server):
 
-## Deploy on Vercel
+```bash
+npm run test:e2e
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Run E2E in headed mode:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run test:e2e:headed
+```
+
+## CI-ready E2E flow
+
+Use this command in CI:
+
+```bash
+npm run test:e2e:ci
+```
+
+It runs `build` first, then Playwright with `next start` web server.
+
+GitHub Actions workflow is included at:
+
+- `.github/workflows/e2e.yml`
+
+## E2E Environment Variables
+
+- `E2E_PORT`: server port for Playwright-managed web server (default `3000`)
+- `E2E_BASE_URL`: override base URL (default `http://127.0.0.1:<E2E_PORT>`)
+- `E2E_SERVER_CMD`: override server command used by Playwright
+- `CI`: if set, Playwright uses `next start`; otherwise `next dev`
+
+## Notes
+
+- Route-level error boundaries are enabled for `auth`, `dashboard`, and `storefront`.
+- Onboarding wizard route: `/dashboard/onboarding`.
+# project-y-frontend
