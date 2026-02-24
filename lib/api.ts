@@ -14,6 +14,16 @@ export type AuthSessionResponse = {
   user: AuthUser;
 };
 
+export type SignupResponse = {
+  user: AuthUser;
+  store: { id: string | null; name: string | null; slug: string | null };
+  pending_verification: boolean;
+  verification_token?: string | null;
+  otp?: string | null;
+  expires_in_seconds?: number;
+  created?: boolean;
+};
+
 export type StoreMembership = {
   store_id: string;
   role: "owner" | "admin" | "editor" | "viewer";
@@ -126,7 +136,7 @@ export async function apiFetch<T>(
 
 export const authApi = {
   signup(input: { full_name: string; email: string; password: string; brand: string; country_code: string }) {
-    return apiFetch<{ user: AuthUser; store: { id: string; name: string; slug: string }; verification_token: string }>("/auth/signup", {
+    return apiFetch<SignupResponse>("/auth/signup", {
       method: "POST",
       body: input,
     });
@@ -140,11 +150,17 @@ export const authApi = {
   logout() {
     return apiFetch<Record<string, never>>("/auth/logout", { method: "POST", body: {} });
   },
-  verifyEmail(token: string) {
+  verifyEmailByToken(token: string) {
     return apiFetch<{ user: AuthUser }>("/auth/verify-email", { method: "POST", body: { token } });
   },
+  verifyEmailByOtp(email: string, otp: string) {
+    return apiFetch<{ user: AuthUser }>("/auth/verify-email", { method: "POST", body: { email, otp } });
+  },
   resendVerification(email: string) {
-    return apiFetch<{ verification_token?: string }>("/auth/resend-verification", { method: "POST", body: { email } });
+    return apiFetch<{ pending_verification: boolean; verification_token?: string | null; otp?: string | null }>(
+      "/auth/resend-verification",
+      { method: "POST", body: { email } },
+    );
   },
   me(token?: string) {
     return apiFetch<AuthUser>("/auth/me", { token });

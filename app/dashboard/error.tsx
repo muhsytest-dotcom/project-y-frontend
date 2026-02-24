@@ -13,7 +13,7 @@ export default function DashboardError({ reset }: { reset: () => void }) {
           <p className="soft mt-2">Retry now or return later.</p>
           <div className="mt-4 flex gap-2">
             <Button onClick={reset}>Retry</Button>
-            <a className="button button-muted" href="/auth">Go to Auth</a>
+            <a className="button button-muted" href="/login">Go to Auth</a>
           </div>
         </Card>
       </div>

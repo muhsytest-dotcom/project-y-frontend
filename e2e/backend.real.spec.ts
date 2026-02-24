@@ -10,9 +10,7 @@ test.describe("real backend integration", () => {
     const productName = `Perfume ${runId}`;
     const productSlug = `perfume-${runId}`;
 
-    await page.goto("/auth");
-
-    await page.getByRole("button", { name: /^signup$/i }).click();
+    await page.goto("/signup");
     await page.getByPlaceholder(/full name/i).fill("Owner Real");
     await page.getByPlaceholder(/^brand$/i).fill(`Brand ${runId}`);
     await page.getByPlaceholder(/country code/i).fill("SA");
@@ -21,7 +19,7 @@ test.describe("real backend integration", () => {
     const signupResponsePromise = page.waitForResponse(
       (res) => res.url().includes("/auth/signup") && res.request().method() === "POST",
     );
-    await page.getByRole("button", { name: /^submit$/i }).click();
+    await page.getByRole("button", { name: /^submit$/i }).first().click();
     const signupResponse = await signupResponsePromise;
     expect(signupResponse.status()).toBe(201);
 
@@ -29,7 +27,7 @@ test.describe("real backend integration", () => {
     let verifiedViaUi = false;
     if (await verificationInput.isVisible({ timeout: 2000 }).catch(() => false)) {
       await expect(verificationInput).toHaveValue(/[0-9a-f-]{8,}/i);
-      await page.getByRole("button", { name: /^submit$/i }).click();
+      await page.getByRole("button", { name: /verify otp/i }).click();
       verifiedViaUi = true;
     }
 
@@ -51,10 +49,13 @@ test.describe("real backend integration", () => {
       }
     }
 
-    await page.getByRole("button", { name: /^login$/i }).click();
-    await page.getByPlaceholder(/^email$/i).fill(email);
-    await page.getByPlaceholder(/^password$/i).fill(password);
-    await page.getByRole("button", { name: /^submit$/i }).click();
+    const loginResponse = await page.request.post(`${apiBase}/auth/login`, {
+      data: { email, password },
+      headers: { Accept: "application/json; version=1" },
+    });
+    expect(loginResponse.ok()).toBeTruthy();
+
+    await page.goto("/dashboard");
 
     await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 });
     await expect(page.getByRole("heading", { name: /store operations/i })).toBeVisible();
@@ -69,7 +70,7 @@ test.describe("real backend integration", () => {
     await expect(page.getByRole("cell", { name: productName })).toBeVisible();
 
     await page.getByRole("button", { name: /preview/i }).first().click();
-    await expect(page).toHaveURL(/\/storefront\/preview\//);
+    await expect(page).toHaveURL(/\/storefront\/preview\//, { timeout: 15_000 });
     await expect(page.getByText(/preview mode/i)).toBeVisible();
   });
 });

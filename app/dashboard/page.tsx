@@ -144,7 +144,7 @@ export default function DashboardPage() {
         if (err instanceof ApiError && err.status === 401) {
           clearStoredSession();
           setSession({ access: "", refresh: "" });
-          router.replace("/auth");
+          router.replace("/login");
           return;
         }
         pushToast("error", err instanceof Error ? err.message : toast.failedBootstrap);
@@ -167,7 +167,7 @@ export default function DashboardPage() {
     } catch (err) {
       clearStoredSession();
       setSession({ access: "", refresh: "" });
-      router.replace("/auth");
+      router.replace("/login");
       throw err;
     }
   }
@@ -906,7 +906,7 @@ export default function DashboardPage() {
     }
     clearStoredSession();
     setSession({ access: "", refresh: "" });
-    router.replace("/auth");
+    router.replace("/login");
   }
 
   async function openPreviewStorefront() {

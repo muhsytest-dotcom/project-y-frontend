@@ -8,10 +8,10 @@ export function proxy(request: NextRequest) {
   const hasSession = Boolean(request.cookies.get(REFRESH_COOKIE)?.value);
 
   if (pathname.startsWith("/dashboard") && !hasSession) {
-    return NextResponse.redirect(new URL("/auth", request.url));
+    return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  if (pathname.startsWith("/auth") && hasSession) {
+  if ((pathname.startsWith("/auth") || pathname.startsWith("/login") || pathname.startsWith("/signup")) && hasSession) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
@@ -19,5 +19,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/auth", "/dashboard/:path*"],
+  matcher: ["/auth", "/login", "/signup", "/dashboard/:path*"],
 };

@@ -49,6 +49,7 @@ cd "${BACKEND_DIR}"
 source .venv/bin/activate
 python manage.py migrate --noinput >/dev/null
 CORS_ALLOWED_ORIGINS="${E2E_CORS_ALLOWED_ORIGINS}" CSRF_TRUSTED_ORIGINS="${E2E_CSRF_TRUSTED_ORIGINS}" \
+  AUTH_EXPOSE_DEBUG_VERIFICATION_DATA=true \
   python manage.py runserver "127.0.0.1:${BACKEND_PORT}" >/tmp/projecty-backend-e2e.log 2>&1 &
 BACK_PID=$!
 trap 'kill $BACK_PID 2>/dev/null || true' EXIT
@@ -63,4 +64,5 @@ curl -fsS "http://127.0.0.1:${BACKEND_PORT}/api/v1/status" >/dev/null
 
 cd "${ROOT_DIR}"
 rm -f .next/dev/lock
-E2E_PORT="${FRONTEND_PORT}" E2E_API_BASE="http://127.0.0.1:${BACKEND_PORT}/api/v1" playwright test e2e/backend.real.spec.ts
+npm run build >/dev/null
+CI=1 E2E_PORT="${FRONTEND_PORT}" E2E_API_BASE="http://127.0.0.1:${BACKEND_PORT}/api/v1" playwright test e2e/backend.real.spec.ts

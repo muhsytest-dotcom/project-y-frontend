@@ -32,7 +32,7 @@ export default function HomePage() {
             {words.subtitle}
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
-            <Link href="/auth" className="button button-primary">
+            <Link href="/signup" className="button button-primary">
               {words.signupLogin}
             </Link>
             <Link href="/dashboard" className="button button-muted">

@@ -108,7 +108,7 @@ export default function OnboardingWizardPage() {
       }, fn);
     } catch (err) {
       clearStoredSession();
-      router.replace("/auth");
+      router.replace("/login");
       throw err;
     }
   }

@@ -13,7 +13,7 @@ export default function AuthError({ reset }: { reset: () => void }) {
           <p className="soft mt-2">Retry your action. If needed, return to login.</p>
           <div className="mt-4 flex gap-2">
             <Button onClick={reset}>Retry</Button>
-            <a className="button button-muted" href="/auth">Back to Auth</a>
+            <a className="button button-muted" href="/login">Back to Auth</a>
           </div>
         </Card>
       </div>
