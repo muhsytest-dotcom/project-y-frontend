@@ -14,6 +14,7 @@ function asObj(value: unknown): Record<string, unknown> {
 
 export function resolveStorefrontTheme(store: ThemeLike, activeTheme: ThemeLike): {
   themeKey: string;
+  themeVariant: "classic" | "minimal" | "luxe" | "desert";
   style: CSSProperties;
 } {
   const settings = asObj(activeTheme?.settings_json);
@@ -83,6 +84,7 @@ export function resolveStorefrontTheme(store: ThemeLike, activeTheme: ThemeLike)
 
   return {
     themeKey: rtl ? `${themeKey}-rtl` : themeKey,
+    themeVariant: themeKey as "classic" | "minimal" | "luxe" | "desert",
     style: style as CSSProperties,
   };
 }

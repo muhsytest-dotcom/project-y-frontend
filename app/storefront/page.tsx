@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { analyticsApi, catalogApi, contentApi, publicApi, storesApi } from "@/lib/api";
+import { analyticsApi, publicApi } from "@/lib/api";
 import { Card } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Toast, ToastStack } from "@/components/ui/ToastStack";
@@ -13,7 +13,6 @@ import { OrderResultSection } from "@/components/storefront/OrderResultSection";
 import { Locale, t } from "@/lib/i18n";
 import { convertMinor, formatMinorMoney, getFxTable } from "@/lib/currency";
 import { getPreferredLocale, setPreferredLocale } from "@/lib/locale";
-import { resolvePreviewToken } from "@/lib/preview";
 import { resolveStorefrontTheme } from "@/lib/storefront-theme";
 
 type Product = {
@@ -29,6 +28,7 @@ type CartItem = {
   id: string;
   product_id: string;
   quantity: number;
+  unit_price_amount_minor?: number;
   line_total_amount_minor: number;
   options: Array<{ option_value_id: string }>;
 };
@@ -85,12 +85,12 @@ export function StorefrontScreen({ previewToken }: { previewToken?: string }) {
   const [rtl, setRtl] = useState(false);
   const [preferredCurrency, setPreferredCurrency] = useState("SAR");
   const [activeTheme, setActiveTheme] = useState<Record<string, unknown> | null>(null);
-  const [previewSession, setPreviewSession] = useState<{ storeId: string; access: string } | null>(null);
+  const previewHeaderToken = previewToken || undefined;
 
   const cartItems = useMemo(() => ((cart?.items as CartItem[] | undefined) || []), [cart]);
   const words = t(locale).storefront;
   const toast = words.toast;
-  const isPreview = Boolean(previewSession);
+  const isPreview = Boolean(previewHeaderToken);
   const fx = useMemo(() => getFxTable(String(store?.default_currency || "SAR")), [store]);
   const theme = useMemo(() => resolveStorefrontTheme(store, activeTheme), [store, activeTheme]);
   const themeName = String(activeTheme?.name || activeTheme?.code || "classic");
@@ -105,71 +105,40 @@ export function StorefrontScreen({ previewToken }: { previewToken?: string }) {
     return formatMoney(locale, convertedMinor, targetCurrency);
   };
 
-  useEffect(() => {
-    if (!previewToken) {
-      setPreviewSession(null);
-      return;
-    }
-    const payload = resolvePreviewToken(previewToken);
-    if (!payload) {
-      pushToast("error", toast.invalidPreviewToken);
-      setPreviewSession(null);
-      setLoading(false);
-      return;
-    }
-    setPreviewSession({ storeId: payload.storeId, access: payload.access });
-  }, [previewToken, toast.invalidPreviewToken]);
-
   /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     void (async () => {
-      if (previewToken && !previewSession) return;
       setLoading(true);
       try {
-        if (previewSession) {
-          const [storeRes, sectionRes, categoryRes, productsRes, themesRes] = await Promise.all([
-            storesApi.getStore(previewSession.access, previewSession.storeId),
-            contentApi.listSections(previewSession.access, previewSession.storeId, "home"),
-            catalogApi.listCategories(previewSession.access, previewSession.storeId),
-            catalogApi.listProducts(previewSession.access, previewSession.storeId),
-            contentApi.listThemes(previewSession.access, previewSession.storeId),
-          ]);
-          setStore(storeRes);
-          setSections(sectionRes.items || []);
-          setCategories(categoryRes.items || []);
-          setProducts(
-            ((productsRes.items || []) as Array<Record<string, unknown>>).map((p) => ({
-              id: String(p.id),
-              name: String(p.name || ""),
-              slug: String(p.slug || ""),
-              description: String(p.description || ""),
-              price_amount_minor: Number(p.base_price_amount_minor || 0),
-              currency_code: String(p.currency_code || "SAR"),
-            })),
-          );
-          const active = (themesRes.items || []).find((item) => Boolean((item as Record<string, unknown>).is_active));
-          setActiveTheme((active || null) as Record<string, unknown> | null);
+        const [storeRes, sectionRes, categoryRes, productsRes] = await Promise.all([
+          publicApi.store(previewHeaderToken),
+          publicApi.sections("home", previewHeaderToken),
+          publicApi.categories(previewHeaderToken),
+          publicApi.products("", "", previewHeaderToken),
+        ]);
+        setStore(storeRes);
+        setSections(sectionRes.items || []);
+        setCategories(categoryRes.items || []);
+        setProducts((productsRes.items || []) as Product[]);
+        setActiveTheme((storeRes.active_theme as Record<string, unknown> | undefined) || null);
+
+        if (isPreview) {
+          setCart({
+            token: "preview-local",
+            currency_code: String(storeRes.default_currency || "SAR"),
+            items: [],
+            status: "active",
+          });
         } else {
-          const [storeRes, sectionRes, categoryRes, productsRes] = await Promise.all([
-            publicApi.store(),
-            publicApi.sections("home"),
-            publicApi.categories(),
-            publicApi.products(),
-          ]);
-          setStore(storeRes);
-          setSections(sectionRes.items || []);
-          setCategories(categoryRes.items || []);
-          setProducts((productsRes.items || []) as Product[]);
-          setActiveTheme((storeRes.active_theme as Record<string, unknown> | undefined) || null);
           await analyticsApi.ingestPublicEvent({ event_name: "page_view", source: "storefront" });
         }
       } catch (err) {
-        pushToast("error", err instanceof Error ? err.message : toast.failedLoadStorefront);
+        pushToast("error", err instanceof Error ? err.message : isPreview ? toast.invalidPreviewToken : toast.failedLoadStorefront);
       } finally {
         setLoading(false);
       }
     })();
-  }, [previewToken, previewSession?.storeId, previewSession?.access]);
+  }, [previewHeaderToken]);
   /* eslint-enable react-hooks/exhaustive-deps */
 
   useEffect(() => {
@@ -177,11 +146,11 @@ export function StorefrontScreen({ previewToken }: { previewToken?: string }) {
   }, [locale]);
 
   useEffect(() => {
-    if (previewSession) return;
+    if (isPreview) return;
     void (async () => {
       setLoading(true);
       try {
-        const res = await publicApi.products(search.trim(), categoryId);
+        const res = await publicApi.products(search.trim(), categoryId, previewHeaderToken);
         setProducts((res.items || []) as Product[]);
       } catch (err) {
         pushToast("error", err instanceof Error ? err.message : toast.failedRefreshProducts);
@@ -191,7 +160,7 @@ export function StorefrontScreen({ previewToken }: { previewToken?: string }) {
     })();
     // search trigger remains explicit via Search button.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoryId, previewSession]);
+  }, [categoryId, isPreview, previewHeaderToken]);
 
   function pushToast(tone: Toast["tone"], message: string) {
     const id = `${Date.now()}-${Math.random()}`;
@@ -203,24 +172,10 @@ export function StorefrontScreen({ previewToken }: { previewToken?: string }) {
     setLoading(true);
     try {
       const q = search.trim();
-      if (previewSession) {
-        const res = await catalogApi.listProducts(previewSession.access, previewSession.storeId, `limit=50&offset=0&search=${encodeURIComponent(q)}`);
-        setProducts(
-          ((res.items || []) as Array<Record<string, unknown>>).map((p) => ({
-            id: String(p.id),
-            name: String(p.name || ""),
-            slug: String(p.slug || ""),
-            description: String(p.description || ""),
-            price_amount_minor: Number(p.base_price_amount_minor || 0),
-            currency_code: String(p.currency_code || "SAR"),
-          })),
-        );
-      } else {
-        const res = await publicApi.products(q, categoryId);
-        setProducts((res.items || []) as Product[]);
-        if (q) {
-          await analyticsApi.ingestPublicEvent({ event_name: "search", source: "storefront", search_query: q });
-        }
+      const res = await publicApi.products(q, categoryId, previewHeaderToken);
+      setProducts((res.items || []) as Product[]);
+      if (!isPreview && q) {
+        await analyticsApi.ingestPublicEvent({ event_name: "search", source: "storefront", search_query: q });
       }
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : toast.searchFailed);
@@ -229,16 +184,115 @@ export function StorefrontScreen({ previewToken }: { previewToken?: string }) {
     }
   }
 
+  function computeOptionDeltaMinor(productId: string, optionValueIds: string[]): number {
+    if (!selectedProduct || String(selectedProduct.id) !== productId) return 0;
+    const options = ((selectedProduct.options as Array<Record<string, unknown>> | undefined) || []).flatMap((opt) =>
+      ((opt.values as Array<Record<string, unknown>> | undefined) || []),
+    );
+    const selected = options.filter((v) => optionValueIds.includes(String(v.id)));
+    return selected.reduce((sum, v) => sum + Number(v.price_delta_minor || 0), 0);
+  }
+
+  function validateConfiguratorSelection(): string | null {
+    if (!selectedProduct) return null;
+    const options = (selectedProduct.options as Array<Record<string, unknown>> | undefined) || [];
+
+    for (const option of options) {
+      const valueIds = ((option.values as Array<Record<string, unknown>> | undefined) || []).map((value) => String(value.id));
+      const selectedCount = selectedOptionValueIds.filter((id) => valueIds.includes(id)).length;
+      const optionName = String(option.name || "option");
+      const required = Boolean(option.is_required);
+      const minRaw = Number(option.min_select);
+      const maxRaw = Number(option.max_select);
+      const minSelect = Number.isFinite(minRaw) && minRaw > 0 ? minRaw : 0;
+      const maxSelect = Number.isFinite(maxRaw) && maxRaw > 0 ? maxRaw : null;
+      const selectionType = String(option.selection_type || "single");
+
+      if (required && selectedCount === 0) {
+        return `${toast.optionSelectionRequired} ${optionName}.`;
+      }
+      if (minSelect > 0 && selectedCount < minSelect) {
+        return `${toast.optionSelectAtLeast} ${minSelect} ${toast.optionFor} ${optionName}.`;
+      }
+      if (selectionType === "single" && selectedCount > 1) {
+        return `${toast.optionSelectAtMost} 1 ${toast.optionFor} ${optionName}.`;
+      }
+      if (maxSelect !== null && selectedCount > maxSelect) {
+        return `${toast.optionSelectAtMost} ${maxSelect} ${toast.optionFor} ${optionName}.`;
+      }
+    }
+
+    return null;
+  }
+
+  function upsertPreviewCartItem(productId: string, qty: number, optionValueIds: string[]) {
+    const product = products.find((p) => p.id === productId);
+    if (!product) throw new Error(toast.selectProductFirst);
+    const unit = Number(product.price_amount_minor || 0) + computeOptionDeltaMinor(productId, optionValueIds);
+    const normalizedOptions = [...optionValueIds].sort();
+
+    const currentItems = ((cart?.items as CartItem[] | undefined) || []).slice();
+    const existingIndex = currentItems.findIndex((it) => {
+      const itemOptions = (it.options || []).map((o) => String(o.option_value_id)).sort();
+      return it.product_id === productId && JSON.stringify(itemOptions) === JSON.stringify(normalizedOptions);
+    });
+
+    if (existingIndex >= 0) {
+      const current = currentItems[existingIndex];
+      const nextQty = Math.max(1, Number(current.quantity || 0) + qty);
+      currentItems[existingIndex] = {
+        ...current,
+        quantity: nextQty,
+        unit_price_amount_minor: unit,
+        line_total_amount_minor: unit * nextQty,
+      };
+    } else {
+      currentItems.push({
+        id: key("pci"),
+        product_id: productId,
+        quantity: Math.max(1, qty),
+        unit_price_amount_minor: unit,
+        line_total_amount_minor: unit * Math.max(1, qty),
+        options: normalizedOptions.map((id) => ({ option_value_id: id })),
+      });
+    }
+
+    setCart({
+      token: "preview-local",
+      status: "active",
+      currency_code: String(store?.default_currency || product.currency_code || "SAR"),
+      items: currentItems,
+      subtotal_amount_minor: currentItems.reduce((sum, item) => sum + Number(item.line_total_amount_minor || 0), 0),
+    });
+  }
+
+  function previewSubtotalMinor(): number {
+    return cartItems.reduce((sum, item) => sum + Number(item.line_total_amount_minor || 0), 0);
+  }
+
   async function updateCartItem(itemId: string, nextQuantity: number) {
-    if (previewSession) {
-      pushToast("info", toast.previewCheckoutUnavailable);
+    if (isPreview) {
+      const currentItems = ((cart?.items as CartItem[] | undefined) || []).slice();
+      const idx = currentItems.findIndex((item) => item.id === itemId);
+      if (idx < 0) return;
+      const unit = Number(currentItems[idx].unit_price_amount_minor || 0) || Math.floor(Number(currentItems[idx].line_total_amount_minor || 0) / Math.max(1, currentItems[idx].quantity));
+      const qty = Math.max(1, nextQuantity);
+      currentItems[idx] = { ...currentItems[idx], quantity: qty, line_total_amount_minor: unit * qty, unit_price_amount_minor: unit };
+      setCart({
+        token: "preview-local",
+        status: "active",
+        currency_code: String(cart?.currency_code || store?.default_currency || "SAR"),
+        items: currentItems,
+        subtotal_amount_minor: currentItems.reduce((sum, item) => sum + Number(item.line_total_amount_minor || 0), 0),
+      });
+      pushToast("success", toast.cartItemUpdated);
       return;
     }
     if (!cart?.token) return;
     setLoading(true);
     try {
-      await publicApi.updateCartItem(cart.token as string, itemId, { quantity: Math.max(1, nextQuantity) });
-      setCart(await publicApi.cart(cart.token as string));
+      await publicApi.updateCartItem(cart.token as string, itemId, { quantity: Math.max(1, nextQuantity) }, previewHeaderToken);
+      setCart(await publicApi.cart(cart.token as string, previewHeaderToken));
       pushToast("success", toast.cartItemUpdated);
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : toast.failedUpdateCartItem);
@@ -248,15 +302,23 @@ export function StorefrontScreen({ previewToken }: { previewToken?: string }) {
   }
 
   async function deleteCartItem(itemId: string) {
-    if (previewSession) {
-      pushToast("info", toast.previewCheckoutUnavailable);
+    if (isPreview) {
+      const currentItems = ((cart?.items as CartItem[] | undefined) || []).filter((item) => item.id !== itemId);
+      setCart({
+        token: "preview-local",
+        status: "active",
+        currency_code: String(cart?.currency_code || store?.default_currency || "SAR"),
+        items: currentItems,
+        subtotal_amount_minor: currentItems.reduce((sum, item) => sum + Number(item.line_total_amount_minor || 0), 0),
+      });
+      pushToast("success", toast.cartItemRemoved);
       return;
     }
     if (!cart?.token) return;
     setLoading(true);
     try {
-      await publicApi.deleteCartItem(cart.token as string, itemId);
-      setCart(await publicApi.cart(cart.token as string));
+      await publicApi.deleteCartItem(cart.token as string, itemId, previewHeaderToken);
+      setCart(await publicApi.cart(cart.token as string, previewHeaderToken));
       pushToast("success", toast.cartItemRemoved);
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : toast.failedRemoveCartItem);
@@ -273,34 +335,11 @@ export function StorefrontScreen({ previewToken }: { previewToken?: string }) {
   async function loadProduct(slug: string) {
     setLoading(true);
     try {
-      let detail: Record<string, unknown>;
-      if (previewSession) {
-        const inList = products.find((p) => p.slug === slug);
-        if (!inList) throw new Error(toast.productLoadFailed);
-        const options = await catalogApi.listOptions(previewSession.access, previewSession.storeId, inList.id);
-        detail = {
-          id: inList.id,
-          name: inList.name,
-          slug: inList.slug,
-          description: inList.description,
-          price_amount_minor: inList.price_amount_minor,
-          currency_code: inList.currency_code,
-          options: (options || []).map((opt) => ({
-            ...opt,
-            values: (((opt as Record<string, unknown>).values as Array<Record<string, unknown>>) || []).map((v) => ({
-              id: v.id,
-              label: v.label,
-              price_delta_minor: Number(v.price_delta_minor || 0),
-            })),
-          })),
-        };
-      } else {
-        detail = await publicApi.product(slug);
-      }
+      const detail = await publicApi.product(slug, previewHeaderToken);
       setSelectedProduct(detail);
       setSelectedOptionValueIds([]);
       setQuantity(1);
-      if (!previewSession) {
+      if (!isPreview) {
         await analyticsApi.ingestPublicEvent({ event_name: "product_view", product_id: detail.id, source: "storefront" });
       }
     } catch (err) {
@@ -311,18 +350,25 @@ export function StorefrontScreen({ previewToken }: { previewToken?: string }) {
   }
 
   async function ensureCartToken(): Promise<string> {
-    if (previewSession) throw new Error(toast.previewCheckoutUnavailable);
+    if (isPreview) {
+      if (!cart?.token) {
+        setCart({
+          token: "preview-local",
+          status: "active",
+          currency_code: String(store?.default_currency || "SAR"),
+          items: [],
+          subtotal_amount_minor: 0,
+        });
+      }
+      return "preview-local";
+    }
     if (cart?.token) return cart.token as string;
-    const created = await publicApi.createCart();
+    const created = await publicApi.createCart({}, previewHeaderToken);
     setCart(created);
     return created.token as string;
   }
 
   async function addToCart() {
-    if (previewSession) {
-      pushToast("info", toast.previewCheckoutUnavailable);
-      return;
-    }
     if (!selectedProduct?.id) {
       pushToast("error", toast.selectProductFirst);
       return;
@@ -331,18 +377,30 @@ export function StorefrontScreen({ previewToken }: { previewToken?: string }) {
       pushToast("error", toast.quantityAtLeastOne);
       return;
     }
+    const selectionError = validateConfiguratorSelection();
+    if (selectionError) {
+      pushToast("error", selectionError);
+      return;
+    }
 
     setLoading(true);
     try {
-      const token = await ensureCartToken();
-      await publicApi.addCartItem(token, {
-        product_id: selectedProduct.id,
-        quantity,
-        option_value_ids: selectedOptionValueIds,
-      });
-      setCart(await publicApi.cart(token));
+      if (isPreview) {
+        await ensureCartToken();
+        upsertPreviewCartItem(String(selectedProduct.id), quantity, selectedOptionValueIds);
+      } else {
+        const token = await ensureCartToken();
+        await publicApi.addCartItem(token, {
+          product_id: selectedProduct.id,
+          quantity,
+          option_value_ids: selectedOptionValueIds,
+        }, previewHeaderToken);
+        setCart(await publicApi.cart(token, previewHeaderToken));
+      }
       pushToast("success", toast.addedToCart);
-      await analyticsApi.ingestPublicEvent({ event_name: "add_to_cart", source: "storefront", product_id: selectedProduct.id });
+      if (!isPreview) {
+        await analyticsApi.ingestPublicEvent({ event_name: "add_to_cart", source: "storefront", product_id: selectedProduct.id });
+      }
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : toast.failedAddToCart);
     } finally {
@@ -351,24 +409,41 @@ export function StorefrontScreen({ previewToken }: { previewToken?: string }) {
   }
 
   async function getQuote() {
-    if (previewSession) {
-      pushToast("info", toast.previewCheckoutUnavailable);
-      return;
-    }
     if (!cart?.token) {
       pushToast("error", toast.createCartFirst);
+      return;
+    }
+    if (cartItems.length === 0) {
+      pushToast("error", toast.cartIsEmpty);
       return;
     }
 
     setLoading(true);
     try {
-      const q = await publicApi.applyDiscount(cart.token as string, {
-        discount_code: discountCode || undefined,
-        shipping: { shipping_country_code: shipping.shipping_country_code },
-      });
-      setQuote(q);
+      if (isPreview) {
+        const subtotal = previewSubtotalMinor();
+        const discountAmount = discountCode.trim() ? Math.floor(subtotal * 0.1) : 0;
+        const shippingAmount = 0;
+        const taxAmount = 0;
+        const total = Math.max(0, subtotal - discountAmount + shippingAmount + taxAmount);
+        setQuote({
+          preview: true,
+          currency_code: String(cart.currency_code || store?.default_currency || "SAR"),
+          subtotal_amount_minor: subtotal,
+          discount_amount_minor: discountAmount,
+          shipping_amount_minor: shippingAmount,
+          tax_amount_minor: taxAmount,
+          total_amount_minor: total,
+        });
+      } else {
+        const q = await publicApi.applyDiscount(cart.token as string, {
+          discount_code: discountCode || undefined,
+          shipping: { shipping_country_code: shipping.shipping_country_code },
+        }, previewHeaderToken);
+        setQuote(q);
+        await analyticsApi.ingestPublicEvent({ event_name: "checkout_started", source: "storefront" });
+      }
       pushToast("success", toast.quoteCalculated);
-      await analyticsApi.ingestPublicEvent({ event_name: "checkout_started", source: "storefront" });
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : toast.quoteFailed);
     } finally {
@@ -377,10 +452,6 @@ export function StorefrontScreen({ previewToken }: { previewToken?: string }) {
   }
 
   async function checkout() {
-    if (previewSession) {
-      pushToast("info", toast.previewCheckoutUnavailable);
-      return;
-    }
     if (!cart?.token || cartItems.length === 0) {
       pushToast("error", toast.cartIsEmpty);
       return;
@@ -396,21 +467,57 @@ export function StorefrontScreen({ previewToken }: { previewToken?: string }) {
 
     setLoading(true);
     try {
-      const result = await publicApi.checkoutCart(
-        cart.token as string,
-        {
-          customer,
-          shipping,
-          discount_code: discountCode || undefined,
-          notes: "checkout from storefront",
-        },
-        key("checkout"),
-      );
+      let result: Record<string, unknown>;
+      if (isPreview) {
+        const subtotal = previewSubtotalMinor();
+        const discountAmount = quote ? Number(quote.discount_amount_minor || 0) : (discountCode.trim() ? Math.floor(subtotal * 0.1) : 0);
+        const shippingAmount = quote ? Number(quote.shipping_amount_minor || 0) : 0;
+        const total = Math.max(0, subtotal - discountAmount + shippingAmount);
+        const orderNumber = `PREVIEW-${String(Date.now()).slice(-6)}`;
+        const whatsappNumber = String(store?.whatsapp_number || "").replace(/\D+/g, "");
+        const message = encodeURIComponent(`Preview order ${orderNumber}\nTotal: ${total / 100} ${String(cart.currency_code || "SAR")}`);
+        result = {
+          preview: true,
+          order_number: orderNumber,
+          subtotal_amount_minor: subtotal,
+          discount_amount_minor: discountAmount,
+          shipping_amount_minor: shippingAmount,
+          tax_amount_minor: 0,
+          total_amount_minor: total,
+          currency_code: String(cart.currency_code || store?.default_currency || "SAR"),
+          status: "simulated",
+          whatsapp_url: whatsappNumber ? `https://wa.me/${whatsappNumber}?text=${message}` : undefined,
+        };
+      } else {
+        result = await publicApi.checkoutCart(
+          cart.token as string,
+          {
+            customer,
+            shipping,
+            discount_code: discountCode || undefined,
+            notes: "checkout from storefront",
+          },
+          key("checkout"),
+          previewHeaderToken,
+        );
+      }
       setOrderResult(result);
       setQuote(null);
-      setCart(await publicApi.createCart());
+      if (isPreview) {
+        setCart({
+          token: "preview-local",
+          status: "active",
+          currency_code: String(cart.currency_code || store?.default_currency || "SAR"),
+          items: [],
+          subtotal_amount_minor: 0,
+        });
+      } else {
+        setCart(await publicApi.createCart({}, previewHeaderToken));
+      }
       pushToast("success", toast.orderPlaced);
-      await analyticsApi.ingestPublicEvent({ event_name: "order_created", source: "storefront" });
+      if (!isPreview) {
+        await analyticsApi.ingestPublicEvent({ event_name: "order_created", source: "storefront" });
+      }
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : toast.checkoutFailed);
     } finally {
@@ -455,6 +562,7 @@ export function StorefrontScreen({ previewToken }: { previewToken?: string }) {
             searchProducts={searchProducts}
             isPreview={isPreview}
             themeName={themeName}
+            themeVariant={theme.themeVariant}
           />
         ) : null}
 
@@ -470,6 +578,7 @@ export function StorefrontScreen({ previewToken }: { previewToken?: string }) {
             loadProduct={loadProduct}
             addToCart={addToCart}
             amount={amount}
+            themeVariant={theme.themeVariant}
           />
         ) : null}
 
@@ -491,6 +600,7 @@ export function StorefrontScreen({ previewToken }: { previewToken?: string }) {
             setShipping={setShipping}
             checkout={checkout}
             amount={amount}
+            themeVariant={theme.themeVariant}
           />
         ) : null}
 

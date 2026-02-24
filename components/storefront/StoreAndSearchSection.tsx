@@ -30,6 +30,7 @@ type Props = {
   searchProducts: () => Promise<void>;
   isPreview: boolean;
   themeName: string;
+  themeVariant: "classic" | "minimal" | "luxe" | "desert";
 };
 
 export function StoreAndSearchSection({
@@ -52,7 +53,75 @@ export function StoreAndSearchSection({
   searchProducts,
   isPreview,
   themeName,
+  themeVariant,
 }: Props) {
+  const sectionGridClass =
+    themeVariant === "minimal"
+      ? "mt-3 space-y-2"
+      : themeVariant === "luxe"
+        ? "mt-3 grid gap-3 sm:grid-cols-1 xl:grid-cols-3"
+        : "mt-3 grid gap-2 sm:grid-cols-2";
+
+  const shellClass =
+    themeVariant === "luxe"
+      ? "rounded-xl border border-[#d8c27f] bg-[#fffaf0] p-4"
+      : themeVariant === "desert"
+        ? "rounded-xl border border-[#dfb9a8] bg-[#fff6f1] p-4"
+        : "rounded-xl border border-[#d9ddcf] bg-white p-4";
+
+  function sectionVisual(section: Record<string, unknown>) {
+    const type = String(section.section_type || "");
+    const config = (section.config_json as Record<string, unknown> | undefined) || {};
+    const title = String(section.title || labels.untitled);
+    const subtitle = String(section.subtitle || "");
+    const imageUrl = String(config.image_url || "");
+    const ctaLabel = String(config.cta_label || "");
+    const ctaUrl = String(config.cta_url || "");
+
+    if (type === "hero" || type === "banner") {
+      const heroClass =
+        themeVariant === "minimal"
+          ? "rounded-xl border border-[#d9ddcf] bg-white p-4"
+          : themeVariant === "luxe"
+            ? "rounded-xl border border-[#dcc58d] bg-gradient-to-r from-[#fff8e6] to-[#fff0c9] p-4"
+            : themeVariant === "desert"
+              ? "rounded-xl border border-[#dfb9a8] bg-gradient-to-r from-[#ffe9df] to-[#fff4eb] p-4"
+              : "rounded-xl border border-[#d9ddcf] bg-gradient-to-r from-[#e8f0ff] to-[#fff4dd] p-4";
+      return (
+        <div
+          className={heroClass}
+          style={imageUrl ? { backgroundImage: `linear-gradient(rgba(255,255,255,0.80), rgba(255,255,255,0.88)), url(${imageUrl})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
+        >
+          <p className="badge badge-info">{type}</p>
+          <p className="mt-2 text-lg font-black">{title}</p>
+          {subtitle ? <p className="soft mt-1 text-sm">{subtitle}</p> : null}
+          {ctaLabel ? (
+            <a href={ctaUrl || "#"} className="button button-primary mt-3 inline-flex">{ctaLabel}</a>
+          ) : null}
+        </div>
+      );
+    }
+
+    if (type === "featured_products" || type === "trending") {
+      const itemCount = Number(config.item_count || 0);
+      return (
+        <div className={shellClass}>
+          <p className="badge badge-warn">{type}</p>
+          <p className="mt-2 font-semibold">{title}</p>
+          <p className="soft mt-1 text-sm">{subtitle || `${itemCount || 0} items configured`}</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className={shellClass}>
+        <p className="badge badge-warn">{type || "section"}</p>
+        <p className="mt-2 font-semibold">{title}</p>
+        <p className="soft text-sm">{subtitle}</p>
+      </div>
+    );
+  }
+
   return (
     <section className="grid gap-4 lg:grid-cols-3">
       <Card className="lg:col-span-2">
@@ -62,12 +131,10 @@ export function StoreAndSearchSection({
         {isPreview ? (
           <p className="badge badge-warn mt-2">{labels.previewMode || "Preview mode"}</p>
         ) : null}
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <div className={sectionGridClass}>
           {sections.map((s) => (
-            <div key={String(s.id)} className="rounded-xl border border-[#d9ddcf] bg-white p-3">
-              <p className="badge badge-warn">{String(s.section_type)}</p>
-              <p className="mt-2 font-semibold">{String(s.title || labels.untitled)}</p>
-              <p className="soft text-sm">{String(s.subtitle || "")}</p>
+            <div key={String(s.id)}>
+              {sectionVisual(s)}
             </div>
           ))}
         </div>

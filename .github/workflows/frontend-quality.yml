@@ -1,0 +1,48 @@
+name: Frontend Quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  test:
+    name: Lint + Build + E2E
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: E2E (mock mode)
+        run: npm run test:e2e
+
+      - name: E2E (real backend, optional)
+        if: ${{ secrets.E2E_API_BASE != '' }}
+        env:
+          E2E_API_BASE: ${{ secrets.E2E_API_BASE }}
+          E2E_PORT: "3101"
+        run: npx playwright test e2e/backend.real.spec.ts

@@ -1,13 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const port = Number(process.env.E2E_PORT || 3000);
+const port = Number(process.env.E2E_PORT || 3101);
 const baseURL = process.env.E2E_BASE_URL || `http://127.0.0.1:${port}`;
 const apiBase = process.env.E2E_API_BASE || process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/api/v1";
 const serverCommand =
   process.env.E2E_SERVER_CMD ||
   (process.env.CI
     ? `NEXT_PUBLIC_API_BASE=${apiBase} npm run start -- --port ${port}`
-    : `NEXT_PUBLIC_API_BASE=${apiBase} npm run dev -- --port ${port}`);
+    : `bash -lc "rm -f .next/dev/lock; NEXT_PUBLIC_API_BASE=${apiBase} npm run dev -- --port ${port}"`);
 
 export default defineConfig({
   testDir: "./e2e",
@@ -22,7 +22,7 @@ export default defineConfig({
   webServer: {
     command: serverCommand,
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 120_000,
   },
   projects: [

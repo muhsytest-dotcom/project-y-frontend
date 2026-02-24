@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  ApiError,
   analyticsApi,
   authApi,
   billingApi,
@@ -33,7 +34,6 @@ import { IntegrationsTab } from "@/components/dashboard/IntegrationsTab";
 import { Locale, t } from "@/lib/i18n";
 import { formatMinorMoney } from "@/lib/currency";
 import { getPreferredLocale, setPreferredLocale } from "@/lib/locale";
-import { createPreviewToken } from "@/lib/preview";
 
 function asText(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -72,6 +72,8 @@ export default function DashboardPage() {
   const [analyticsOverview, setAnalyticsOverview] = useState<Record<string, unknown> | null>(null);
   const [topProducts, setTopProducts] = useState<Array<Record<string, unknown>>>([]);
   const [searchQueries, setSearchQueries] = useState<Array<Record<string, unknown>>>([]);
+  const [ordersTimeseries, setOrdersTimeseries] = useState<Array<Record<string, unknown>>>([]);
+  const [emailSummary, setEmailSummary] = useState<Record<string, unknown> | null>(null);
 
   const [sections, setSections] = useState<Array<Record<string, unknown>>>([]);
   const [themes, setThemes] = useState<Array<Record<string, unknown>>>([]);
@@ -84,6 +86,9 @@ export default function DashboardPage() {
 
   const [newProduct, setNewProduct] = useState({ name: "", slug: "", priceMinor: "1000", currency: "SAR" });
   const [newCategory, setNewCategory] = useState({ name: "", slug: "" });
+  const [editProduct, setEditProduct] = useState({ id: "", name: "", slug: "", priceMinor: "0", currency: "SAR", status: "active" });
+  const [editCategory, setEditCategory] = useState({ id: "", name: "", slug: "" });
+  const [categoryLink, setCategoryLink] = useState({ productId: "", categoryId: "" });
   const [newDomainHost, setNewDomainHost] = useState("");
   const [newOption, setNewOption] = useState({ productId: "", name: "", optionKind: "variant", selectionType: "single" });
   const [newOptionValue, setNewOptionValue] = useState({ productId: "", optionId: "", label: "", priceDeltaMinor: "0" });
@@ -121,15 +126,11 @@ export default function DashboardPage() {
   /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     const stored = getStoredSession();
-    if (!stored.access) {
-      router.replace("/auth");
-      return;
-    }
     void (async () => {
       setSession(stored);
       setLoading(true);
       try {
-        const storeRes = await withAutoRefresh(stored, setSession, (token) => authApi.meStores(token));
+        const storeRes = await withAutoRefresh(stored, setSession, (token) => authApi.meStores(token || undefined));
         setStores(storeRes.stores);
         if (!storeRes.stores.length) {
           setStoreId("");
@@ -140,6 +141,12 @@ export default function DashboardPage() {
         setStoreId(first);
         await loadStoreData(first, stored);
       } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          clearStoredSession();
+          setSession({ access: "", refresh: "" });
+          router.replace("/auth");
+          return;
+        }
         pushToast("error", err instanceof Error ? err.message : toast.failedBootstrap);
       } finally {
         setLoading(false);
@@ -166,7 +173,7 @@ export default function DashboardPage() {
   }
 
   async function loadStoreData(selectedStoreId: string, currentSession = session) {
-    if (!currentSession.access || !selectedStoreId) return;
+    if (!selectedStoreId) return;
     setLoading(true);
     try {
       const [
@@ -183,6 +190,8 @@ export default function DashboardPage() {
         overviewRes,
         topRes,
         searchRes,
+        ordersTimeseriesRes,
+        emailSummaryRes,
         sectionsRes,
         themesRes,
         emailRes,
@@ -202,6 +211,8 @@ export default function DashboardPage() {
         withAutoRefresh(currentSession, setSession, (token) => analyticsApi.overview(token, selectedStoreId)),
         withAutoRefresh(currentSession, setSession, (token) => analyticsApi.topProducts(token, selectedStoreId)),
         withAutoRefresh(currentSession, setSession, (token) => analyticsApi.searchQueries(token, selectedStoreId)),
+        withAutoRefresh(currentSession, setSession, (token) => analyticsApi.ordersTimeseries(token, selectedStoreId)),
+        withAutoRefresh(currentSession, setSession, (token) => analyticsApi.emailSummary(token, selectedStoreId)),
         withAutoRefresh(currentSession, setSession, (token) => contentApi.listSections(token, selectedStoreId, "home")),
         withAutoRefresh(currentSession, setSession, (token) => contentApi.listThemes(token, selectedStoreId)),
         withAutoRefresh(currentSession, setSession, (token) => notificationsApi.listEmailEvents(token, selectedStoreId)),
@@ -225,6 +236,8 @@ export default function DashboardPage() {
       setAnalyticsOverview(overviewRes);
       setTopProducts(topRes.items || []);
       setSearchQueries(searchRes.items || []);
+      setOrdersTimeseries(ordersTimeseriesRes.items || []);
+      setEmailSummary(emailSummaryRes);
 
       setSections(sectionsRes.items || []);
       setThemes(themesRes.items || []);
@@ -279,6 +292,21 @@ export default function DashboardPage() {
     await loadStoreData(storeId);
   }
 
+  async function onUpdateProduct() {
+    if (!storeId || !editProduct.id || !editProduct.name.trim() || !editProduct.slug.trim()) return;
+    await runWithSession((token) =>
+      catalogApi.patchProduct(token, storeId, editProduct.id, {
+        name: editProduct.name.trim(),
+        slug: editProduct.slug.trim(),
+        status: editProduct.status,
+        base_price_amount_minor: Number(editProduct.priceMinor || 0),
+        currency_code: editProduct.currency.trim().toUpperCase(),
+      }),
+    );
+    pushToast("success", toast.productCreated);
+    await loadStoreData(storeId);
+  }
+
   async function onCreateCategory() {
     if (!storeId || !newCategory.name.trim() || !newCategory.slug.trim()) {
       pushToast("error", toast.categoryNameSlugRequired);
@@ -299,6 +327,32 @@ export default function DashboardPage() {
   async function onDeleteCategory(categoryId: string) {
     if (!storeId) return;
     await runWithSession((token) => catalogApi.deleteCategory(token, storeId, categoryId));
+    pushToast("success", toast.categoryDeleted);
+    await loadStoreData(storeId);
+  }
+
+  async function onUpdateCategory() {
+    if (!storeId || !editCategory.id || !editCategory.name.trim() || !editCategory.slug.trim()) return;
+    await runWithSession((token) =>
+      catalogApi.patchCategory(token, storeId, editCategory.id, {
+        name: editCategory.name.trim(),
+        slug: editCategory.slug.trim(),
+      }),
+    );
+    pushToast("success", toast.categoryCreated);
+    await loadStoreData(storeId);
+  }
+
+  async function onLinkProductCategory() {
+    if (!storeId || !categoryLink.productId || !categoryLink.categoryId) return;
+    await runWithSession((token) => catalogApi.linkProductCategory(token, storeId, categoryLink.productId, categoryLink.categoryId));
+    pushToast("success", toast.categoryCreated);
+    await loadStoreData(storeId);
+  }
+
+  async function onUnlinkProductCategory() {
+    if (!storeId || !categoryLink.productId || !categoryLink.categoryId) return;
+    await runWithSession((token) => catalogApi.unlinkProductCategory(token, storeId, categoryLink.productId, categoryLink.categoryId));
     pushToast("success", toast.categoryDeleted);
     await loadStoreData(storeId);
   }
@@ -846,7 +900,7 @@ export default function DashboardPage() {
 
   async function onLogout() {
     try {
-      await runWithSession((token) => authApi.logout(token, session.refresh));
+      await authApi.logout();
     } catch {
       // ignore
     }
@@ -855,13 +909,17 @@ export default function DashboardPage() {
     router.replace("/auth");
   }
 
-  function openPreviewStorefront() {
-    if (!storeId || !session.access) {
+  async function openPreviewStorefront() {
+    if (!storeId) {
       router.push("/storefront");
       return;
     }
-    const token = createPreviewToken({ storeId, access: session.access, refresh: session.refresh });
-    router.push(`/storefront/preview/${encodeURIComponent(token)}`);
+    try {
+      const res = await runWithSession((token) => storesApi.createPreviewToken(token, storeId));
+      router.push(`/storefront/preview/${encodeURIComponent(String(res.preview_token || ""))}`);
+    } catch (err) {
+      pushToast("error", err instanceof Error ? err.message : toast.requestFailed);
+    }
   }
 
   const storeName = useMemo(() => stores.find((s) => s.store_id === storeId)?.name || "", [stores, storeId]);
@@ -882,9 +940,9 @@ export default function DashboardPage() {
     <main className="px-4 py-8 sm:px-8" dir={locale === "ar" ? "rtl" : "ltr"}>
       <ToastStack toasts={toasts} />
 
-      <Modal open={orderModalOpen} title={`Order events • ${activeOrderNumber}`} onClose={() => setOrderModalOpen(false)}>
+      <Modal open={orderModalOpen} title={`${words.orderEventsTitle} • ${activeOrderNumber}`} onClose={() => setOrderModalOpen(false)}>
         {orderEvents.length === 0 ? (
-          <EmptyState title="No events" description="No timeline events were returned for this order." />
+          <EmptyState title={words.noEvents} description={words.noEventsDesc} />
         ) : (
           <ul className="space-y-2 text-sm">
             {orderEvents.map((ev) => (
@@ -901,13 +959,13 @@ export default function DashboardPage() {
         <Card>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="badge badge-info">Dashboard</p>
+              <p className="badge badge-info">{words.badge}</p>
               <h1 className="mt-3 text-2xl font-black sm:text-4xl">{words.title}</h1>
               <p className="soft mt-2">{words.subtitle}</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Link href="/storefront" className="button button-muted">{words.storefront}</Link>
-              <Button variant="muted" onClick={openPreviewStorefront}>Preview</Button>
+              <Button variant="muted" onClick={() => void openPreviewStorefront()}>{words.preview}</Button>
               <Link href="/dashboard/onboarding" className="button button-muted">{words.onboarding}</Link>
               <select
                 className="select w-auto min-w-20"
@@ -937,7 +995,7 @@ export default function DashboardPage() {
               <Button variant="muted" onClick={() => void loadStoreData(storeId)}>{words.refresh}</Button>
             </div>
           ) : (
-            <EmptyState title="No stores" description="Create a store from signup flow first." />
+            <EmptyState title={words.noStoresTitle} description={words.noStoresDesc} />
           )}
         </Card>
 
@@ -975,8 +1033,8 @@ export default function DashboardPage() {
               <h3 className="text-lg font-bold">{form.storePublish}</h3>
               <p className="soft mt-2 code">{JSON.stringify(storeInfo)}</p>
               <div className="mt-3 flex gap-2">
-                <Button onClick={() => void onPublish(true)}>Publish</Button>
-                <Button variant="muted" onClick={() => void onPublish(false)}>Unpublish</Button>
+                <Button onClick={() => void onPublish(true)}>{form.publish}</Button>
+                <Button variant="muted" onClick={() => void onPublish(false)}>{form.unpublish}</Button>
               </div>
             </Card>
             <Card>
@@ -1043,12 +1101,23 @@ export default function DashboardPage() {
           <>
             <CatalogTab
               products={products}
+              categories={categories}
               newProduct={newProduct}
               setNewProduct={setNewProduct}
               onCreateProduct={onCreateProduct}
+              editProduct={editProduct}
+              setEditProduct={setEditProduct}
+              onUpdateProduct={onUpdateProduct}
               newCategory={newCategory}
               setNewCategory={setNewCategory}
               onCreateCategory={onCreateCategory}
+              editCategory={editCategory}
+              setEditCategory={setEditCategory}
+              onUpdateCategory={onUpdateCategory}
+              categoryLink={categoryLink}
+              setCategoryLink={setCategoryLink}
+              onLinkProductCategory={onLinkProductCategory}
+              onUnlinkProductCategory={onUnlinkProductCategory}
               money={money}
               asText={asText}
               labels={{
@@ -1064,6 +1133,13 @@ export default function DashboardPage() {
                 createFirstProduct: form.createFirstProduct,
                 status: form.status,
                 price: form.price,
+                update: form.update,
+                add: form.add,
+                delete: form.delete,
+                action: form.action,
+                selectProduct: form.selectProduct,
+                updateDiscount: form.updateDiscount,
+                updateShipping: form.updateShipping,
               }}
             />
             <section className="grid gap-4 lg:grid-cols-2">
@@ -1310,6 +1386,8 @@ export default function DashboardPage() {
             analyticsOverview={analyticsOverview}
             topProducts={topProducts}
             searchQueries={searchQueries}
+            ordersTimeseries={ordersTimeseries}
+            emailSummary={emailSummary}
             asText={asText}
             labels={{
               overview: form.overview,
@@ -1318,6 +1396,10 @@ export default function DashboardPage() {
               sold: form.sold,
               searchQueries: form.searchQueries,
               noSearchesYet: form.noSearchesYet,
+              orders: form.orders,
+              emailEvents: form.emailEvents,
+              noOrders: form.noOrders,
+              noEmailEvents: form.noEmailEvents,
             }}
           />
         ) : null}

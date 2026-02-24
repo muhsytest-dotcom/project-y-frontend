@@ -9,9 +9,7 @@ export type AuthUser = {
   is_email_verified?: boolean;
 };
 
-export type AuthTokens = {
-  access: string;
-  refresh: string;
+export type AuthSessionResponse = {
   token_type: string;
   user: AuthUser;
 };
@@ -34,6 +32,18 @@ export class ApiError extends Error {
     this.status = status;
     this.payload = payload;
   }
+}
+
+function getCookie(name: string): string {
+  if (typeof document === "undefined") return "";
+  const cookies = document.cookie ? document.cookie.split("; ") : [];
+  for (const cookie of cookies) {
+    const [key, ...rest] = cookie.split("=");
+    if (key === name) {
+      return decodeURIComponent(rest.join("=") || "");
+    }
+  }
+  return "";
 }
 
 async function parseError(response: Response): Promise<{ message: string; payload: unknown }> {
@@ -77,11 +87,18 @@ export async function apiFetch<T>(
   }: { method?: ApiMethod; token?: string; body?: unknown; headers?: Record<string, string> } = {},
 ): Promise<T> {
   const initHeaders: Record<string, string> = {
+    Accept: "application/json; version=1",
     ...(headers || {}),
   };
 
   if (body !== undefined) {
     initHeaders["Content-Type"] = "application/json";
+  }
+  if (!["GET", "HEAD", "OPTIONS", "TRACE"].includes(method)) {
+    const csrfToken = getCookie("csrftoken");
+    if (csrfToken) {
+      initHeaders["X-CSRFToken"] = csrfToken;
+    }
   }
   if (token) {
     initHeaders.Authorization = `Bearer ${token}`;
@@ -92,6 +109,7 @@ export async function apiFetch<T>(
     headers: initHeaders,
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",
+    credentials: "include",
   });
 
   if (!response.ok) {
@@ -114,13 +132,13 @@ export const authApi = {
     });
   },
   login(email: string, password: string) {
-    return apiFetch<AuthTokens>("/auth/login", { method: "POST", body: { email, password } });
+    return apiFetch<AuthSessionResponse>("/auth/login", { method: "POST", body: { email, password } });
   },
-  refresh(refresh: string) {
-    return apiFetch<{ access: string; token_type: string }>("/auth/refresh", { method: "POST", body: { refresh } });
+  refresh() {
+    return apiFetch<{ token_type: string }>("/auth/refresh", { method: "POST", body: {} });
   },
-  logout(token: string, refresh: string) {
-    return apiFetch<Record<string, never>>("/auth/logout", { method: "POST", token, body: { refresh } });
+  logout() {
+    return apiFetch<Record<string, never>>("/auth/logout", { method: "POST", body: {} });
   },
   verifyEmail(token: string) {
     return apiFetch<{ user: AuthUser }>("/auth/verify-email", { method: "POST", body: { token } });
@@ -128,10 +146,10 @@ export const authApi = {
   resendVerification(email: string) {
     return apiFetch<{ verification_token?: string }>("/auth/resend-verification", { method: "POST", body: { email } });
   },
-  me(token: string) {
+  me(token?: string) {
     return apiFetch<AuthUser>("/auth/me", { token });
   },
-  meStores(token: string) {
+  meStores(token?: string) {
     return apiFetch<{ stores: StoreMembership[] }>("/auth/me/stores", { token });
   },
 };
@@ -179,6 +197,9 @@ export const storesApi = {
   },
   deleteDomain(token: string, storeId: string, domainId: string) {
     return apiFetch<Record<string, never>>(`/stores/${storeId}/domains/${domainId}`, { token, method: "DELETE" });
+  },
+  createPreviewToken(token: string, storeId: string) {
+    return apiFetch<{ preview_token: string; expires_in: number }>(`/stores/${storeId}/preview-token`, { token, method: "POST" });
   },
 };
 
@@ -411,61 +432,98 @@ export const integrationsApi = {
 };
 
 export const publicApi = {
-  store() {
-    return apiFetch<Record<string, unknown>>(`/public/store`);
+  store(previewToken?: string) {
+    return apiFetch<Record<string, unknown>>(`/public/store`, {
+      headers: previewToken ? { "X-Store-Preview-Token": previewToken } : undefined,
+    });
   },
-  sections(pageKey = "home") {
-    return apiFetch<{ items: Array<Record<string, unknown>> }>(`/public/sections?page_key=${encodeURIComponent(pageKey)}`);
+  sections(pageKey = "home", previewToken?: string) {
+    return apiFetch<{ items: Array<Record<string, unknown>> }>(`/public/sections?page_key=${encodeURIComponent(pageKey)}`, {
+      headers: previewToken ? { "X-Store-Preview-Token": previewToken } : undefined,
+    });
   },
-  categories() {
-    return apiFetch<{ items: Array<Record<string, unknown>> }>(`/public/categories`);
+  categories(previewToken?: string) {
+    return apiFetch<{ items: Array<Record<string, unknown>> }>(`/public/categories`, {
+      headers: previewToken ? { "X-Store-Preview-Token": previewToken } : undefined,
+    });
   },
-  products(search = "", categoryId = "") {
+  products(search = "", categoryId = "", previewToken?: string) {
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     if (categoryId) params.set("category_id", categoryId);
     const query = params.toString() ? `?${params.toString()}` : "";
-    return apiFetch<{ items: Array<Record<string, unknown>> }>(`/public/products${query}`);
+    return apiFetch<{ items: Array<Record<string, unknown>> }>(`/public/products${query}`, {
+      headers: previewToken ? { "X-Store-Preview-Token": previewToken } : undefined,
+    });
   },
-  product(slug: string) {
-    return apiFetch<Record<string, unknown>>(`/public/products/${slug}`);
+  product(slug: string, previewToken?: string) {
+    return apiFetch<Record<string, unknown>>(`/public/products/${slug}`, {
+      headers: previewToken ? { "X-Store-Preview-Token": previewToken } : undefined,
+    });
   },
-  quote(body: Record<string, unknown>) {
-    return apiFetch<Record<string, unknown>>(`/public/checkout/quote`, { method: "POST", body });
+  quote(body: Record<string, unknown>, previewToken?: string) {
+    return apiFetch<Record<string, unknown>>(`/public/checkout/quote`, {
+      method: "POST",
+      body,
+      headers: previewToken ? { "X-Store-Preview-Token": previewToken } : undefined,
+    });
   },
-  createOrder(body: Record<string, unknown>, idempotencyKey: string) {
+  createOrder(body: Record<string, unknown>, idempotencyKey: string, previewToken?: string) {
     return apiFetch<Record<string, unknown>>(`/public/orders`, {
       method: "POST",
       body,
-      headers: { "Idempotency-Key": idempotencyKey },
+      headers: { "Idempotency-Key": idempotencyKey, ...(previewToken ? { "X-Store-Preview-Token": previewToken } : {}) },
     });
   },
-  orderConfirmation(confirmationToken: string) {
-    return apiFetch<Record<string, unknown>>(`/public/orders/${encodeURIComponent(confirmationToken)}/confirmation`);
+  orderConfirmation(confirmationToken: string, previewToken?: string) {
+    return apiFetch<Record<string, unknown>>(`/public/orders/${encodeURIComponent(confirmationToken)}/confirmation`, {
+      headers: previewToken ? { "X-Store-Preview-Token": previewToken } : undefined,
+    });
   },
-  createCart(body?: Record<string, unknown>) {
-    return apiFetch<Record<string, unknown>>(`/public/carts`, { method: "POST", body: body || {} });
+  createCart(body?: Record<string, unknown>, previewToken?: string) {
+    return apiFetch<Record<string, unknown>>(`/public/carts`, {
+      method: "POST",
+      body: body || {},
+      headers: previewToken ? { "X-Store-Preview-Token": previewToken } : undefined,
+    });
   },
-  cart(cartToken: string) {
-    return apiFetch<Record<string, unknown>>(`/public/carts/${cartToken}`);
+  cart(cartToken: string, previewToken?: string) {
+    return apiFetch<Record<string, unknown>>(`/public/carts/${cartToken}`, {
+      headers: previewToken ? { "X-Store-Preview-Token": previewToken } : undefined,
+    });
   },
-  addCartItem(cartToken: string, body: Record<string, unknown>) {
-    return apiFetch<Record<string, unknown>>(`/public/carts/${cartToken}/items`, { method: "POST", body });
+  addCartItem(cartToken: string, body: Record<string, unknown>, previewToken?: string) {
+    return apiFetch<Record<string, unknown>>(`/public/carts/${cartToken}/items`, {
+      method: "POST",
+      body,
+      headers: previewToken ? { "X-Store-Preview-Token": previewToken } : undefined,
+    });
   },
-  updateCartItem(cartToken: string, itemId: string, body: Record<string, unknown>) {
-    return apiFetch<Record<string, unknown>>(`/public/carts/${cartToken}/items/${itemId}`, { method: "PATCH", body });
+  updateCartItem(cartToken: string, itemId: string, body: Record<string, unknown>, previewToken?: string) {
+    return apiFetch<Record<string, unknown>>(`/public/carts/${cartToken}/items/${itemId}`, {
+      method: "PATCH",
+      body,
+      headers: previewToken ? { "X-Store-Preview-Token": previewToken } : undefined,
+    });
   },
-  deleteCartItem(cartToken: string, itemId: string) {
-    return apiFetch<Record<string, never>>(`/public/carts/${cartToken}/items/${itemId}`, { method: "DELETE" });
+  deleteCartItem(cartToken: string, itemId: string, previewToken?: string) {
+    return apiFetch<Record<string, never>>(`/public/carts/${cartToken}/items/${itemId}`, {
+      method: "DELETE",
+      headers: previewToken ? { "X-Store-Preview-Token": previewToken } : undefined,
+    });
   },
-  applyDiscount(cartToken: string, body: Record<string, unknown>) {
-    return apiFetch<Record<string, unknown>>(`/public/carts/${cartToken}/apply-discount`, { method: "POST", body });
+  applyDiscount(cartToken: string, body: Record<string, unknown>, previewToken?: string) {
+    return apiFetch<Record<string, unknown>>(`/public/carts/${cartToken}/apply-discount`, {
+      method: "POST",
+      body,
+      headers: previewToken ? { "X-Store-Preview-Token": previewToken } : undefined,
+    });
   },
-  checkoutCart(cartToken: string, body: Record<string, unknown>, idempotencyKey: string) {
+  checkoutCart(cartToken: string, body: Record<string, unknown>, idempotencyKey: string, previewToken?: string) {
     return apiFetch<Record<string, unknown>>(`/public/carts/${cartToken}/checkout`, {
       method: "POST",
       body,
-      headers: { "Idempotency-Key": idempotencyKey },
+      headers: { "Idempotency-Key": idempotencyKey, ...(previewToken ? { "X-Store-Preview-Token": previewToken } : {}) },
     });
   },
 };

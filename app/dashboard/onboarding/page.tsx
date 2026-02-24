@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/Button";
 import { Toast, ToastStack } from "@/components/ui/ToastStack";
 import { Locale, t } from "@/lib/i18n";
 import { getPreferredLocale, setPreferredLocale } from "@/lib/locale";
-import { createPreviewToken } from "@/lib/preview";
 
 const steps = ["brand", "seo", "first_product", "options", "sections", "preview", "payment", "domain"] as const;
 type Step = (typeof steps)[number];
@@ -47,15 +46,11 @@ export default function OnboardingWizardPage() {
   // Bootstrap should run once on mount; locale text changes should not re-trigger API bootstrap.
   useEffect(() => {
     const stored = getStoredSession();
-    if (!stored.access) {
-      router.replace("/auth");
-      return;
-    }
     setSession(stored);
     void (async () => {
       setLoading(true);
       try {
-        const storesRes = await withAutoRefresh(stored, setSession, (token) => authApi.meStores(token));
+        const storesRes = await withAutoRefresh(stored, setSession, (token) => authApi.meStores(token || undefined));
         if (!storesRes.stores.length) {
           pushToast("error", toast.noStores);
           return;
@@ -335,13 +330,17 @@ export default function OnboardingWizardPage() {
     setDomains(updated.items || []);
   }
 
-  function openPreviewStorefront() {
-    if (!storeId || !session.access) {
+  async function openPreviewStorefront() {
+    if (!storeId) {
       router.push("/storefront");
       return;
     }
-    const token = createPreviewToken({ storeId, access: session.access, refresh: session.refresh });
-    router.push(`/storefront/preview/${encodeURIComponent(token)}`);
+    try {
+      const res = await runWithSession((token) => storesApi.createPreviewToken(token, storeId));
+      router.push(`/storefront/preview/${encodeURIComponent(String(res.preview_token || ""))}`);
+    } catch (err) {
+      pushToast("error", err instanceof Error ? err.message : toast.failedLoadWizard);
+    }
   }
 
   /* eslint-disable react-hooks/exhaustive-deps */
@@ -369,7 +368,7 @@ export default function OnboardingWizardPage() {
             </div>
             <div className="flex gap-2">
               <Link href="/dashboard" className="button button-muted">{words.backToDashboard}</Link>
-              <Button variant="muted" onClick={openPreviewStorefront}>{words.openStorefront}</Button>
+              <Button variant="muted" onClick={() => void openPreviewStorefront()}>{words.openStorefront}</Button>
               <select
                 className="select w-auto min-w-20"
                 value={locale}
@@ -484,7 +483,7 @@ export default function OnboardingWizardPage() {
             <h2 className="text-xl font-bold">{words.previewPublish}</h2>
             <p className="soft mt-2">{words.previewHelp}</p>
             <div className="mt-3 flex gap-2">
-              <Button variant="muted" onClick={openPreviewStorefront}>{words.previewStorefront}</Button>
+              <Button variant="muted" onClick={() => void openPreviewStorefront()}>{words.previewStorefront}</Button>
               <Button onClick={() => void completePreview()} disabled={loading}>{words.continueToPayment}</Button>
             </div>
           </Card>

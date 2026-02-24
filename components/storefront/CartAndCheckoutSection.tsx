@@ -27,6 +27,13 @@ type Props = {
     city: string;
     countryCode: string;
     placeOrder: string;
+    discountCode: string;
+    quotePreview: string;
+    subtotal: string;
+    discount: string;
+    shipping: string;
+    tax: string;
+    total: string;
   };
   discountCode: string;
   setDiscountCode: (value: string) => void;
@@ -53,6 +60,7 @@ type Props = {
   }) => void;
   checkout: () => Promise<void>;
   amount: (minor: number | undefined, currencyCode: string | undefined) => string;
+  themeVariant: "classic" | "minimal" | "luxe" | "desert";
 };
 
 export function CartAndCheckoutSection({
@@ -72,7 +80,15 @@ export function CartAndCheckoutSection({
   setShipping,
   checkout,
   amount,
+  themeVariant,
 }: Props) {
+  const itemCardClass =
+    themeVariant === "luxe"
+      ? "rounded-xl border border-[#dcc58d] bg-[#fffaf0] p-3"
+      : themeVariant === "desert"
+        ? "rounded-xl border border-[#dfb9a8] bg-[#fff6f1] p-3"
+        : "rounded-xl border border-[#d9ddcf] bg-white p-3";
+
   return (
     <section className="grid gap-4 lg:grid-cols-2">
       <Card>
@@ -82,7 +98,7 @@ export function CartAndCheckoutSection({
         ) : (
           <ul className="mt-3 space-y-2 text-sm">
             {cartItems.map((item) => (
-              <li key={item.id} className="rounded-xl border border-[#d9ddcf] bg-white p-3">
+              <li key={item.id} className={itemCardClass}>
                 <p className="font-semibold">{getProductName(item.product_id)}</p>
                 <p className="soft mt-1">{labels.qty} {item.quantity} • {amount(item.line_total_amount_minor, String(cart?.currency_code || ""))}</p>
                 <div className="mt-2 flex gap-2">
@@ -95,10 +111,26 @@ export function CartAndCheckoutSection({
           </ul>
         )}
         <div className="mt-3 space-y-2">
-          <input className="input" placeholder="Discount code" value={discountCode} onChange={(e) => setDiscountCode(e.target.value)} />
+          <input className="input" placeholder={labels.discountCode} value={discountCode} onChange={(e) => setDiscountCode(e.target.value)} />
           <Button onClick={() => void getQuote()}>{labels.getQuote}</Button>
         </div>
-        {quote ? <p className="soft mt-2 code">{JSON.stringify(quote)}</p> : null}
+        {quote ? (
+          <div className="mt-3 rounded-xl border border-[#d9ddcf] bg-white p-3 text-sm">
+            <p className="font-semibold">{labels.quotePreview}</p>
+            <div className="mt-2 grid grid-cols-2 gap-y-1">
+              <span className="soft">{labels.subtotal}</span>
+              <span className="text-right">{amount(Number(quote.subtotal_amount_minor || 0), String(quote.currency_code || cart?.currency_code || ""))}</span>
+              <span className="soft">{labels.discount}</span>
+              <span className="text-right">{amount(Number(quote.discount_amount_minor || 0), String(quote.currency_code || cart?.currency_code || ""))}</span>
+              <span className="soft">{labels.shipping}</span>
+              <span className="text-right">{amount(Number(quote.shipping_amount_minor || 0), String(quote.currency_code || cart?.currency_code || ""))}</span>
+              <span className="soft">{labels.tax}</span>
+              <span className="text-right">{amount(Number(quote.tax_amount_minor || 0), String(quote.currency_code || cart?.currency_code || ""))}</span>
+              <span className="font-semibold">{labels.total}</span>
+              <span className="text-right font-semibold">{amount(Number(quote.total_amount_minor || 0), String(quote.currency_code || cart?.currency_code || ""))}</span>
+            </div>
+          </div>
+        ) : null}
       </Card>
 
       <Card>

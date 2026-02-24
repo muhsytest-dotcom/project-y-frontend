@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const ACCESS_COOKIE = "projecty_access";
+const REFRESH_COOKIE = "projecty_refresh";
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const hasAccess = Boolean(request.cookies.get(ACCESS_COOKIE)?.value);
+  const hasSession = Boolean(request.cookies.get(REFRESH_COOKIE)?.value);
 
-  if (pathname.startsWith("/dashboard") && !hasAccess) {
+  if (pathname.startsWith("/dashboard") && !hasSession) {
     return NextResponse.redirect(new URL("/auth", request.url));
   }
 
-  if (pathname.startsWith("/auth") && hasAccess) {
+  if (pathname.startsWith("/auth") && hasSession) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 

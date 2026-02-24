@@ -93,10 +93,16 @@ export default function AuthPage() {
         setMode("verify");
         pushToast("success", toast.signupComplete);
       } else if (mode === "login") {
-        const res = await authApi.login(email.trim(), password);
-        setStoredSession({ access: res.access, refresh: res.refresh });
+        await authApi.login(email.trim(), password);
+        // Session is backed by backend-issued httpOnly cookies.
+        setStoredSession({ access: "", refresh: "" });
         pushToast("success", toast.loginSuccess);
-        router.push("/dashboard");
+        router.replace("/dashboard");
+        setTimeout(() => {
+          if (window.location.pathname === "/auth") {
+            window.location.assign("/dashboard");
+          }
+        }, 80);
       } else {
         await authApi.verifyEmail(token.trim());
         pushToast("success", toast.emailVerified);
